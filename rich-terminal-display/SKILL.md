@@ -22,13 +22,9 @@ trigger: /rich_display
 
 ## 怎么调用
 
-准备一段 JSON，通过 stdin 传给 `scripts/render.py`：
-
-```bash
-echo '<json>' | uv run --with rich python scripts/render.py
-```
-
-也可以先写成文件再传路径：
+**优先用文件传参，不要用 `echo | stdin`**——实测 `echo '<json>'` 传多行/带 `\n` 转义的内容时，
+Bash 工具会把里面的 `\n` 转成真实换行符，写进字符串值内部会导致 JSON 解析失败
+（`Invalid control character`）。用 Write 工具把 JSON 落一个临时文件，再传路径最稳：
 
 ```bash
 uv run --with rich python scripts/render.py data.json
