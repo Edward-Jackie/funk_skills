@@ -1,5 +1,5 @@
 ---
-name: local-form-input
+name: show_question
 description: |
   当需要一次性收集比 AskUserQuestion 更丰富的结构化信息时（开放文本、多选、滑块，或者超过 4
   道题），生成一个本地 HTML 表单页面，用户填完点"一键复制 JSON"，粘贴回聊天框，我直接从消息
@@ -7,7 +7,7 @@ description: |
   使用场景例如："帮我列个问卷""一次性问我几个问题并收集答案""这几个维度你都问一下我的想法"。
   不要用于 4 道题以内、答案都是从固定选项里选的场景——那种直接用 AskUserQuestion 就行，更快、
   全自动，不需要走这个流程。
-trigger: /local_form
+trigger: /show_question
 ---
 
 # 本地表单收集
