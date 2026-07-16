@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>{{页面标题}}</title>
+<style>
+  /* 配色/字体按当前对话的主题调整，这套是默认的中性深色方案 */
+  :root {
+    --bg: #15181d;
+    --surface: #1c2128;
+    --surface-2: #232a33;
+    --border: #2a323d;
+    --accent: #5b8dee;
+    --success: #4caf7d;
+    --text: #e8eaed;
+    --text-muted: #8a92a0;
+    --font-ui: -apple-system, BlinkMacSystemFont, "PingFang SC", system-ui, sans-serif;
+    --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-ui);
+    padding: 3.5rem 1.5rem 5rem;
+  }
+
+  .page {
+    max-width: 40rem;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2.2rem;
+  }
+
+  header { display: flex; flex-direction: column; gap: 0.6rem; }
+
+  .kicker {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  h1 { font-size: 1.55rem; margin: 0; text-wrap: balance; font-weight: 650; }
+
+  .dek {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 0.92rem;
+    line-height: 1.6;
+    max-width: 54ch;
+  }
+
+  fieldset {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.1rem 1.2rem 1.3rem;
+    background: var(--surface);
+  }
+
+  legend {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    padding: 0 0.4rem;
+  }
+
+  .field { display: flex; flex-direction: column; gap: 0.5rem; }
+
+  input[type="text"], textarea {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 0.55rem 0.7rem;
+    color: var(--text);
+    font-size: 0.92rem;
+    font-family: inherit;
+    width: 100%;
+  }
+
+  input[type="text"]:focus, textarea:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+
+  .choice-row { display: flex; flex-direction: column; gap: 0.5rem; }
+
+  .choice-row label {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    font-size: 0.9rem;
+    cursor: pointer;
+  }
+
+  input[type="radio"], input[type="checkbox"] {
+    accent-color: var(--accent);
+    width: 15px;
+    height: 15px;
+  }
+
+  .range-row { display: flex; align-items: center; gap: 0.8rem; }
+
+  input[type="range"] { flex: 1; accent-color: var(--accent); }
+
+  .range-val {
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    color: var(--accent);
+    min-width: 2.4em;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .preview { display: flex; flex-direction: column; gap: 0.6rem; }
+
+  .preview h2 {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+    margin: 0;
+    font-weight: 600;
+  }
+
+  pre {
+    margin: 0;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.1rem;
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    line-height: 1.55;
+    color: #9fd3a8;
+    overflow-x: auto;
+    white-space: pre;
+  }
+
+  .actions { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+
+  button {
+    background: var(--accent);
+    color: #0d1420;
+    border: none;
+    border-radius: 8px;
+    padding: 0.7rem 1.3rem;
+    font-size: 0.92rem;
+    font-weight: 650;
+    font-family: inherit;
+    cursor: pointer;
+  }
+
+  button:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+  button:active { transform: translateY(1px); }
+
+  button.secondary {
+    background: transparent;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+  }
+
+  .status { font-size: 0.85rem; color: var(--text-muted); }
+  .status.done { color: var(--success); }
+
+  footer {
+    border-top: 1px solid var(--border);
+    padding-top: 1.2rem;
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    line-height: 1.65;
+  }
+
+  footer code { font-family: var(--font-mono); color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header>
+    <span class="kicker">{{一句话说明这是干什么的}}</span>
+    <h1>{{标题}}</h1>
+    <p class="dek">{{一两句说明：为什么用这个表单收集信息，填完怎么办}}</p>
+  </header>
+
+  <!--
+    下面是题型示例，按实际需要的问题增删 fieldset。
+    每个字段都要在下面 script 的 collectAnswers() 里对应取值，键名用中文、
+    跟问题本身对得上，方便回传后直接读懂。
+  -->
+  <form id="surveyForm">
+    <fieldset>
+      <legend>{{开放式问题}}</legend>
+      <div class="field">
+        <input type="text" id="freeText" placeholder="{{占位提示}}" autocomplete="off">
+      </div>
+    </fieldset>
+
+    <fieldset style="margin-top: 1rem;">
+      <legend>{{单选问题}}</legend>
+      <div class="choice-row" id="radioGroup">
+        <label><input type="radio" name="pick" value="选项A" checked> 选项A</label>
+        <label><input type="radio" name="pick" value="选项B"> 选项B</label>
+      </div>
+    </fieldset>
+  </form>
+
+  <div class="preview">
+    <h2>实时预览 · 这就是会被复制的内容</h2>
+    <pre id="jsonPreview"></pre>
+  </div>
+
+  <div class="actions">
+    <button type="button" id="copyBtn">一键复制 JSON</button>
+    <button type="button" id="downloadBtn" class="secondary">改成下载文件</button>
+    <span class="status" id="status"></span>
+  </div>
+
+  <footer>
+    复制用的是浏览器原生剪贴板 API，跟下载一样不经过任何网络请求，CSP 挡不住。
+    复制完直接粘贴发回聊天框就行，不用额外说明。
+  </footer>
+
+</div>
+
+<script>
+  // 收集当前表单里的所有答案 —— 按实际字段增删，键名用中文、跟问题对应
+  function collectAnswers() {
+    var form = document.getElementById('surveyForm');
+    var picked = form.querySelector('input[name="pick"]:checked');
+
+    return {
+      开放式问题: document.getElementById('freeText').value,
+      单选问题: picked ? picked.value : null,
+      生成时间: new Date().toISOString()
+    };
+  }
+
+  function updatePreview() {
+    document.getElementById('jsonPreview').textContent =
+      JSON.stringify(collectAnswers(), null, 2);
+  }
+
+  document.getElementById('surveyForm').addEventListener('input', updatePreview);
+  updatePreview();
+
+  // 兜底方案：本地 file:// 页面里 navigator.clipboard 不一定能用，
+  // 用不了就退回到老办法——建一个临时 textarea，选中内容后调用 execCommand('copy')
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text);
+    }
+    return new Promise(function (resolve, reject) {
+      var textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      var ok = document.execCommand('copy');
+      document.body.removeChild(textarea);
+      ok ? resolve() : reject(new Error('execCommand copy 失败'));
+    });
+  }
+
+  document.getElementById('copyBtn').addEventListener('click', function () {
+    var text = JSON.stringify(collectAnswers(), null, 2);
+    var status = document.getElementById('status');
+    copyText(text).then(function () {
+      status.textContent = '已复制到剪贴板，直接粘贴发给我就行';
+      status.classList.add('done');
+    }).catch(function (err) {
+      status.textContent = '复制失败（' + err.message + '），改用旁边"改成下载文件"';
+      status.classList.remove('done');
+    });
+  });
+
+  // 下载兜底：复制万一被浏览器拦了，还能存文件让我用 Read 工具读
+  document.getElementById('downloadBtn').addEventListener('click', function () {
+    var data = collectAnswers();
+    var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'claude-form-answers.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    var status = document.getElementById('status');
+    status.textContent = '已下载 claude-form-answers.json，去跟我说一声就行';
+    status.classList.add('done');
+  });
+</script>
+</body>
+</html>
