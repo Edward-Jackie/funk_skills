@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# 检查 MAPCODE 文件是否超过行数阈值，只报告大小，不修改文件。
+# 检查业务地图文件是否超过行数阈值，只报告大小，不修改文件。
 
 set -uo pipefail
 
-DIR="${1:-.codex}"
+DIR="${1:-docs/ai}"
 THRESHOLD="${2:-200}"
 
 shopt -s nullglob
-files=("$DIR"/MAPCODE*.md)
+files=("$DIR"/BUSINESS_MAP*.md "$DIR"/business/*.md)
 if [ ${#files[@]} -eq 0 ]; then
-  echo "目录 '$DIR' 下没有 MAPCODE*.md 文件。"
+  echo "目录 '$DIR' 下没有业务地图文件。"
   exit 0
 fi
 
@@ -28,7 +28,7 @@ done
 
 echo
 if [ "$over" -gt 0 ]; then
-  echo "$over 个文件超过 ${THRESHOLD} 行。拆分调用链时必须原样保留 <!-- manual --> 块。"
+  echo "$over 个文件超过 ${THRESHOLD} 行。拆分业务域时必须原样保留 <!-- manual --> 块。"
 else
   echo "所有文件均未超过阈值。"
 fi
