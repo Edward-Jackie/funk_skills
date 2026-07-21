@@ -1,0 +1,4 @@
+interface:
+  display_name: "代码导航图"
+  short_description: "依据项目 AGENTS.md 生成任务导向代码导航图"
+  default_prompt: "使用 $mapcode 基于本项目的 AGENTS.md 生成或更新代码导航图。"
