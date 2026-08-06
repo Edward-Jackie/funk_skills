@@ -145,6 +145,10 @@
   .more-row.other-input { display: flex; flex-direction: column; align-items: stretch; gap: 0.4rem; }
   .more-row.other-input[hidden] { display: none; }
 
+  .more-row.note-input { display: flex; flex-direction: column; align-items: stretch; gap: 0.4rem; }
+
+  .more-row textarea { resize: vertical; min-height: 3.2rem; }
+
   .more-row label { display: flex; align-items: center; gap: 0.55rem; cursor: pointer; }
 
   .hint {
@@ -230,8 +234,10 @@
     - data-type 支持：text / textarea / radio / checkbox / range
     - 单选/多选想允许"自己填"，加 data-other="true"，并在选项里放一个
       value="其他" 的项（见下方 q2 示例）。
-    - 每个 fieldset 都自带「更多选项」：跳过此题必带；其他自由输入仅
-      data-other="true" 的题型显示。
+    - 每个 fieldset 都自带「更多选项」，统一必备两项：
+        1) 跳过此题（勾选后该题键记为 null）
+        2) 补充说明（可选文本框，独立存为《键名（补充说明）》）
+      data-other="true" 的题型额外再带一个"自己填"输入框。
     - 新增题只需复制一个 fieldset 改 data 属性和文案，JS 不用动。
   -->
   <form id="surveyForm">
@@ -246,6 +252,10 @@
         <summary>更多选项</summary>
         <div class="more-body">
           <label class="more-row"><input type="checkbox" data-skip> 跳过此题</label>
+          <div class="more-row note-input">
+            <span>补充说明：</span>
+            <textarea data-note placeholder="对这道题有什么要补充的"></textarea>
+          </div>
         </div>
       </details>
     </fieldset>
@@ -265,6 +275,10 @@
           <div class="more-row other-input" hidden>
             <span>自己填：</span>
             <input type="text" data-other-text placeholder="填你的答案">
+          </div>
+          <div class="more-row note-input">
+            <span>补充说明：</span>
+            <textarea data-note placeholder="对这道题有什么要补充的"></textarea>
           </div>
         </div>
       </details>
@@ -286,6 +300,10 @@
             <span>自己填：</span>
             <input type="text" data-other-text placeholder="填你的答案">
           </div>
+          <div class="more-row note-input">
+            <span>补充说明：</span>
+            <textarea data-note placeholder="对这道题有什么要补充的"></textarea>
+          </div>
         </div>
       </details>
     </fieldset>
@@ -301,6 +319,10 @@
         <summary>更多选项</summary>
         <div class="more-body">
           <label class="more-row"><input type="checkbox" data-skip> 跳过此题</label>
+          <div class="more-row note-input">
+            <span>补充说明：</span>
+            <textarea data-note placeholder="对这道题有什么要补充的"></textarea>
+          </div>
         </div>
       </details>
     </fieldset>
@@ -340,6 +362,7 @@
       if (skipBox && skipBox.checked) {
         answers[key] = null;
         answers[key + '（跳过）'] = true;
+        answers[key + '（补充说明）'] = noteOf(fs);
         return;
       }
 
@@ -369,9 +392,18 @@
         val = el ? el.value : '';
       }
       answers[key] = val;
+      // 补充说明：非空才记，独立存为《键名（补充说明）》
+      var note = noteOf(fs);
+      if (note) answers[key + '（补充说明）'] = note;
     });
     answers['生成时间'] = new Date().toISOString();
     return answers;
+  }
+
+  // 取某题的补充说明文本（没填就返回空串）
+  function noteOf(fs) {
+    var el = fs.querySelector('[data-note]');
+    return el ? el.value.trim() : '';
   }
 
   function updatePreview() {
