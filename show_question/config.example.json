@@ -1,0 +1,30 @@
+{
+  "title": "产品体验调研",
+  "kicker": "本地表单 · 约 2 分钟",
+  "dek": "请您根据真实使用感受填写；每题都可展开「更多选项」跳过或补充说明。",
+  "groups": [
+    {
+      "name": "基本信息",
+      "fields": [
+        { "key": "姓名", "type": "text", "required": true, "placeholder": "怎么称呼您" },
+        { "key": "性别", "type": "radio", "required": true, "options": ["男", "女"], "other": true },
+        { "key": "所在城市", "type": "select", "options": ["北京", "上海", "广州", "深圳", "其他"] }
+      ]
+    },
+    {
+      "name": "使用体验",
+      "fields": [
+        { "key": "整体满意度", "title": "整体满意度（1-10）", "type": "range", "min": 1, "max": 10, "required": true },
+        { "key": "关注重点", "title": "您最看重哪些方面", "type": "checkbox", "options": ["性能", "外观", "价格", "售后"], "other": true },
+        { "key": "分项评分", "title": "分项评分", "type": "matrix", "rows": ["界面易用性", "运行流畅度", "客服响应"], "cols": ["很差", "较差", "一般", "较好", "很好"] },
+        { "key": "最不满意", "title": "最不满意的地方（选了才会出现）", "type": "textarea", "showWhen": [{ "key": "整体满意度", "value": "1" }], "placeholder": "满意度为 1 时请补充说明" }
+      ]
+    },
+    {
+      "name": "开放反馈",
+      "fields": [
+        { "key": "建议", "type": "textarea", "placeholder": "您的改进建议" }
+      ]
+    }
+  ]
+}
