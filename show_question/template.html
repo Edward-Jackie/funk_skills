@@ -63,6 +63,8 @@
     background: var(--surface);
   }
 
+  fieldset + fieldset { margin-top: 1rem; }
+
   legend {
     font-size: 0.8rem;
     font-weight: 600;
@@ -115,6 +117,40 @@
     min-width: 2.4em;
     text-align: right;
     font-variant-numeric: tabular-nums;
+  }
+
+  /* ===== 更多选项（跳过此题 / 其他自由输入） ===== */
+  details.more {
+    margin-top: 0.8rem;
+    border-top: 1px dashed var(--border);
+    padding-top: 0.7rem;
+  }
+
+  details.more summary {
+    cursor: pointer;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    list-style: none;
+    user-select: none;
+  }
+
+  details.more summary::-webkit-details-marker { display: none; }
+  details.more summary::before { content: "＋ "; color: var(--accent); }
+  details.more[open] summary::before { content: "－ "; }
+
+  .more-body { display: flex; flex-direction: column; gap: 0.6rem; margin-top: 0.6rem; }
+
+  .more-row { display: flex; align-items: center; gap: 0.55rem; font-size: 0.88rem; }
+
+  .more-row.other-input { display: flex; flex-direction: column; align-items: stretch; gap: 0.4rem; }
+  .more-row.other-input[hidden] { display: none; }
+
+  .more-row label { display: flex; align-items: center; gap: 0.55rem; cursor: pointer; }
+
+  .hint {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin: 0;
   }
 
   .preview { display: flex; flex-direction: column; gap: 0.6rem; }
@@ -189,25 +225,86 @@
   </header>
 
   <!--
-    下面是题型示例，按实际需要的问题增删 fieldset。
-    每个字段都要在下面 script 的 collectAnswers() 里对应取值，键名用中文、
-    跟问题本身对得上，方便回传后直接读懂。
+    通用字段驱动写法：
+    - 每个 fieldset 声明 data-key（键名，用中文）和 data-type（题型）。
+    - data-type 支持：text / textarea / radio / checkbox / range
+    - 单选/多选想允许"自己填"，加 data-other="true"，并在选项里放一个
+      value="其他" 的项（见下方 q2 示例）。
+    - 每个 fieldset 都自带「更多选项」：跳过此题必带；其他自由输入仅
+      data-other="true" 的题型显示。
+    - 新增题只需复制一个 fieldset 改 data 属性和文案，JS 不用动。
   -->
   <form id="surveyForm">
-    <fieldset>
-      <legend>{{开放式问题}}</legend>
+
+    <!-- 开放式文本：data-type="text"，天然可自由输入 -->
+    <fieldset data-key="开放式问题" data-type="text">
+      <legend>开放式问题</legend>
       <div class="field">
-        <input type="text" id="freeText" placeholder="{{占位提示}}" autocomplete="off">
+        <input type="text" placeholder="{{占位提示}}" autocomplete="off">
       </div>
+      <details class="more">
+        <summary>更多选项</summary>
+        <div class="more-body">
+          <label class="more-row"><input type="checkbox" data-skip> 跳过此题</label>
+        </div>
+      </details>
     </fieldset>
 
-    <fieldset style="margin-top: 1rem;">
-      <legend>{{单选问题}}</legend>
-      <div class="choice-row" id="radioGroup">
-        <label><input type="radio" name="pick" value="选项A" checked> 选项A</label>
-        <label><input type="radio" name="pick" value="选项B"> 选项B</label>
+    <!-- 单选 + 允许自己填：data-type="radio" data-other="true" -->
+    <fieldset data-key="单选问题" data-type="radio" data-other="true">
+      <legend>单选问题</legend>
+      <div class="choice-row">
+        <label><input type="radio" name="q2" value="选项A" data-choice> 选项A</label>
+        <label><input type="radio" name="q2" value="选项B" data-choice> 选项B</label>
+        <label><input type="radio" name="q2" value="其他" data-other-choice> 其他</label>
       </div>
+      <details class="more">
+        <summary>更多选项</summary>
+        <div class="more-body">
+          <label class="more-row"><input type="checkbox" data-skip> 跳过此题</label>
+          <div class="more-row other-input" hidden>
+            <span>自己填：</span>
+            <input type="text" data-other-text placeholder="填你的答案">
+          </div>
+        </div>
+      </details>
     </fieldset>
+
+    <!-- 多选：data-type="checkbox" 也支持 data-other -->
+    <fieldset data-key="多选题" data-type="checkbox" data-other="true">
+      <legend>多选题</legend>
+      <div class="choice-row">
+        <label><input type="checkbox" name="q3" value="选项甲" data-choice> 选项甲</label>
+        <label><input type="checkbox" name="q3" value="选项乙" data-choice> 选项乙</label>
+        <label><input type="checkbox" name="q3" value="其他" data-other-choice> 其他</label>
+      </div>
+      <details class="more">
+        <summary>更多选项</summary>
+        <div class="more-body">
+          <label class="more-row"><input type="checkbox" data-skip> 跳过此题</label>
+          <div class="more-row other-input" hidden>
+            <span>自己填：</span>
+            <input type="text" data-other-text placeholder="填你的答案">
+          </div>
+        </div>
+      </details>
+    </fieldset>
+
+    <!-- 滑块打分：data-type="range"，只保留跳过，不宜自由填 -->
+    <fieldset data-key="评分（1-10）" data-type="range">
+      <legend>评分（1-10）</legend>
+      <div class="range-row">
+        <input type="range" min="1" max="10" value="5" data-range>
+        <span class="range-val" data-range-val>5</span>
+      </div>
+      <details class="more">
+        <summary>更多选项</summary>
+        <div class="more-body">
+          <label class="more-row"><input type="checkbox" data-skip> 跳过此题</label>
+        </div>
+      </details>
+    </fieldset>
+
   </form>
 
   <div class="preview">
@@ -224,21 +321,57 @@
   <footer>
     复制用的是浏览器原生剪贴板 API，跟下载一样不经过任何网络请求，CSP 挡不住。
     复制完直接粘贴发回聊天框就行，不用额外说明。
+    每题展开「更多选项」可跳过此题；带「其他」的单选题还能自己填答案。
   </footer>
 
 </div>
 
 <script>
-  // 收集当前表单里的所有答案 —— 按实际字段增删，键名用中文、跟问题对应
+  // ===== 通用收集：遍历所有 fieldset，按 data-type 取值，JS 无需按题手写 =====
   function collectAnswers() {
-    var form = document.getElementById('surveyForm');
-    var picked = form.querySelector('input[name="pick"]:checked');
+    var answers = {};
+    var fieldsets = document.querySelectorAll('#surveyForm fieldset[data-key]');
+    fieldsets.forEach(function (fs) {
+      var key = fs.dataset.key;
+      var type = fs.dataset.type;
 
-    return {
-      开放式问题: document.getElementById('freeText').value,
-      单选问题: picked ? picked.value : null,
-      生成时间: new Date().toISOString()
-    };
+      // 跳过此题：键记为 null，另加一个"（跳过）"标记
+      var skipBox = fs.querySelector('[data-skip]');
+      if (skipBox && skipBox.checked) {
+        answers[key] = null;
+        answers[key + '（跳过）'] = true;
+        return;
+      }
+
+      // 其他自由输入：取文本，选中"其他"选项或填了字都算
+      var otherTextEl = fs.querySelector('[data-other-text]');
+      var otherText = otherTextEl ? otherTextEl.value.trim() : '';
+      var otherUsed = fs.querySelector('[data-other-choice]') !== null && (
+        otherText !== '' ||
+        (fs.querySelector('[data-other-choice]:checked') !== null)
+      );
+
+      var val;
+      if (type === 'radio') {
+        var picked = fs.querySelector('input[type=radio][data-choice]:checked, input[type=radio][data-other-choice]:checked');
+        val = picked ? picked.value : null;
+        if (otherUsed && otherText !== '') val = '其他：' + otherText;
+      } else if (type === 'checkbox') {
+        var picks = fs.querySelectorAll('input[type=checkbox]:checked');
+        val = [];
+        picks.forEach(function (c) { val.push(c.value); });
+        if (otherText !== '') val.push('其他：' + otherText);
+      } else if (type === 'range') {
+        val = fs.querySelector('[data-range]').value;
+      } else {
+        // text / textarea
+        var el = fs.querySelector('input[type=text], textarea');
+        val = el ? el.value : '';
+      }
+      answers[key] = val;
+    });
+    answers['生成时间'] = new Date().toISOString();
+    return answers;
   }
 
   function updatePreview() {
@@ -248,6 +381,23 @@
 
   document.getElementById('surveyForm').addEventListener('input', updatePreview);
   updatePreview();
+
+  // 滑块的实时数值显示
+  document.querySelectorAll('[data-range]').forEach(function (r) {
+    r.addEventListener('input', function () {
+      var out = r.closest('.range-row').querySelector('[data-range-val]');
+      if (out) out.textContent = r.value;
+    });
+  });
+
+  // 选了「其他」选项时，展开并显示"自己填"输入框
+  document.querySelectorAll('[data-other-choice]').forEach(function (c) {
+    c.addEventListener('change', function () {
+      var fs = c.closest('fieldset');
+      var box = fs.querySelector('.more-row.other-input');
+      if (box) box.hidden = !(c.checked && c.value === '其他');
+    });
+  });
 
   // 兜底方案：本地 file:// 页面里 navigator.clipboard 不一定能用，
   // 用不了就退回到老办法——建一个临时 textarea，选中内容后调用 execCommand('copy')
