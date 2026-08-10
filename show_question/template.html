@@ -161,7 +161,7 @@
 
   <div class="progress-wrap">
     <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
-    <div class="progress-label" id="progressLabel">0 / 0 必填</div>
+    <div class="progress-label" id="progressLabel">0 / 0 题 · 0%</div>
   </div>
 
   <!-- 表单体由生成器按配置注入 -->
@@ -284,12 +284,12 @@
     return missing;
   }
 
-  // ===== 进度：已填必填数 / 总必填数 =====
+  // ===== 进度：整体完成度（含非必填）+ 百分比 + 当前第几题/共几题 =====
   function updateProgress() {
-    var reqs = Array.from(document.querySelectorAll('#surveyForm fieldset[data-key][data-required="true"]'))
+    var all = Array.from(document.querySelectorAll('#surveyForm fieldset[data-key]'))
       .filter(function (fs) { return !fs.hidden; });
-    var total = reqs.length;
-    var done = reqs.filter(function (fs) {
+    var total = all.length;
+    var done = all.filter(function (fs) {
       var skipBox = fs.querySelector('[data-skip]');
       if (skipBox && skipBox.checked) return true;
       var type = fs.dataset.type;
@@ -300,9 +300,9 @@
       var el = fs.querySelector('input[type=text], textarea');
       return el && el.value.trim() !== '';
     }).length;
-    var pct = total ? Math.round(done / total * 100) : 100;
+    var pct = total ? Math.round(done / total * 100) : 0;
     document.getElementById('progressFill').style.width = pct + '%';
-    document.getElementById('progressLabel').textContent = done + ' / ' + total + ' 必填';
+    document.getElementById('progressLabel').textContent = done + ' / ' + total + ' 题 · ' + pct + '%';
   }
 
   // ===== 条件逻辑：data-show-when 依赖的题显隐 =====
