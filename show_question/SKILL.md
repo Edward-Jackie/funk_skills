@@ -45,6 +45,15 @@ trigger: /show_question
 3. 用 `open <path>` 直接在本地浏览器打开，不要用 Artifact 工具发布到官网（用户偏好本地模式）。
 4. 提示用户填完点"一键复制 JSON"，粘贴回聊天框；"改成下载文件"是复制被浏览器拦截时的兜底选项。
 5. 用户粘贴回来的内容就是一段 JSON 文本，直接解析，不需要额外确认。
+6. **结果落盘存档（推荐）**：解析后把结果存进 `~/Desktop/问卷存档/`，方便后续追溯和汇总。
+   用本目录的 `archive.py`：
+   ```
+   python3 archive.py "<问卷标题>" answer.json        # 先把 JSON 存成 answer.json 再跑
+   echo "$json" | python3 archive.py "<问卷标题>"     # 或直接管道，不用落临时文件
+   ```
+   - 同名问卷多轮自动收进同一个文件，累计数组，每条带「建档批次」时间戳
+   - 加 `--csv` 生成横表：`python3 archive.py "<问卷标题>" answer.json --csv`
+   - 存档目录 `~/Desktop/问卷存档/`，多份归档后可用 `--csv` 汇总对比
 
 ### config.json 字段说明
 
