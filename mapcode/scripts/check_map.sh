@@ -9,7 +9,7 @@ if [ "${1:-}" = "--strict" ]; then
   shift
 fi
 
-INDEX="${1:-docs/ai/BUSINESS_MAP.md}"
+INDEX="${1:-.codex/MAPCODE.md}"
 [ -f "$INDEX" ] || { echo "业务地图不存在：$INDEX" >&2; exit 1; }
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -22,6 +22,18 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 errors=0
 warnings=0
 strict_issues=0
+
+EXPECTED_INDEX="$ROOT/.codex/MAPCODE.md"
+if [ "$INDEX_ABS" != "$EXPECTED_INDEX" ]; then
+  echo "[错误] L1 必须位于 .codex/MAPCODE.md，当前为：${INDEX_ABS#$ROOT/}" >&2
+  errors=$((errors + 1))
+fi
+
+while IFS= read -r nested; do
+  [ -n "$nested" ] || continue
+  echo "[错误] Mapcode 禁止使用子目录：${nested#$ROOT/}" >&2
+  errors=$((errors + 1))
+done < <(find "$ROOT/.codex" -mindepth 2 -type f -name 'MAPCODE*.md' 2>/dev/null)
 
 "$SCRIPT_DIR/check_context_links.sh" "$INDEX_ABS" || errors=$((errors + 1))
 
@@ -47,6 +59,22 @@ while IFS= read -r file; do
     echo "[错误] $rel 缺少完整 mapcode-meta。"
     errors=$((errors + 1))
     continue
+  fi
+
+  base="$(basename "$file")"
+  if [ "$role" = "index" ]; then
+    if [ "$file" != "$EXPECTED_INDEX" ]; then
+      echo "[错误] index 地图只能命名为 .codex/MAPCODE.md：$rel"
+      errors=$((errors + 1))
+    fi
+  elif [ "$role" = "domain" ]; then
+    if [ "$(dirname "$file")" != "$ROOT/.codex" ] || ! printf '%s\n' "$base" | grep -Eq '^MAPCODE-[a-z0-9]+(-[a-z0-9]+)*\.md$'; then
+      echo "[错误] domain 地图必须扁平命名为 .codex/MAPCODE-<小写领域>.md：$rel"
+      errors=$((errors + 1))
+    fi
+  else
+    echo "[错误] $rel 使用未知 map-role：$role"
+    errors=$((errors + 1))
   fi
 
   limit=240

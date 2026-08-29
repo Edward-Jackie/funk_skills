@@ -3,8 +3,16 @@
 
 set -euo pipefail
 
-MAP_FILE="${1:-docs/ai/BUSINESS_MAP.md}"
+MAP_FILE="${1:-.codex/MAPCODE.md}"
 [ -f "$MAP_FILE" ] || { echo "业务地图不存在：$MAP_FILE" >&2; exit 1; }
+
+MAP_DIR="$(cd "$(dirname "$MAP_FILE")" && pwd)"
+ROOT="$(git -C "$MAP_DIR" rev-parse --show-toplevel 2>/dev/null || pwd)"
+MAP_ABS="$MAP_DIR/$(basename "$MAP_FILE")"
+if [ "$MAP_ABS" != "$ROOT/.codex/MAPCODE.md" ]; then
+  echo "L1 必须位于 .codex/MAPCODE.md：${MAP_ABS#$ROOT/}" >&2
+  exit 1
+fi
 
 for heading in "任务路由索引" "业务域与核心链"; do
   grep -Fq "## $heading" "$MAP_FILE" || {
@@ -13,7 +21,6 @@ for heading in "任务路由索引" "业务域与核心链"; do
   }
 done
 
-MAP_DIR="$(dirname "$MAP_FILE")"
 missing=0
 links="$(grep -oE '\]\([^ )#]+\.md\)' "$MAP_FILE" || true)"
 
@@ -24,7 +31,10 @@ while IFS= read -r link; do
   case "$target" in
     http://*|https://*) continue ;;
   esac
-  if [ ! -f "$MAP_DIR/$target" ]; then
+  if ! printf '%s\n' "$target" | grep -Eq '^MAPCODE-[a-z0-9]+(-[a-z0-9]+)*\.md$'; then
+    echo "领域包必须扁平命名为 MAPCODE-<小写领域>.md：$target" >&2
+    missing=1
+  elif [ ! -f "$MAP_DIR/$target" ]; then
     echo "上下文包不存在：$target" >&2
     missing=1
   fi

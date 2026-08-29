@@ -3,17 +3,16 @@
 
 set -uo pipefail
 
-TARGET="${1:-docs/ai}"
+TARGET="${1:-.codex/MAPCODE.md}"
 THRESHOLD="${2:-200}"
 
 shopt -s nullglob
 if [ -f "$TARGET" ]; then
   DIR="$(dirname "$TARGET")"
-  BASE="$(basename "$TARGET" .md)"
-  files=("$TARGET" "$DIR"/"$BASE"-*.md "$DIR"/business/*.md)
+  files=("$TARGET" "$DIR"/MAPCODE-*.md)
 else
   DIR="$TARGET"
-  files=("$DIR"/BUSINESS_MAP*.md "$DIR"/MAPCODE*.md "$DIR"/business/*.md)
+  files=("$DIR"/MAPCODE.md "$DIR"/MAPCODE-*.md)
 fi
 if [ ${#files[@]} -eq 0 ]; then
   echo "'$TARGET' 下没有业务地图文件。"

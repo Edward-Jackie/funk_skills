@@ -31,13 +31,24 @@ Mapcode 保存 Agent 难以从局部源码快速恢复的业务语义，并把�
 
 不要记录 Agent 现场搜索更可靠的内容：普通目录树、机械的 Controller 到 Service 罗列、无状态 CRUD、完整接口清单和重复的项目规范。
 
+## 文件命名与扁平结构
+
+所有项目统一使用以下结构，不接受项目自定义路径、别名或子目录：
+
+```text
+.codex/
+├── MAPCODE.md
+├── MAPCODE-<领域>.md
+└── MAPCODE-<另一领域>.md
+```
+
+- L0：根目录 `AGENTS.md` 等 AI 入口只引用 `.codex/MAPCODE.md`。
+- L1：必须且只能命名为 `.codex/MAPCODE.md`，保存任务路由、业务域摘要、全局不变量和冲突摘要；建议不超过 120 行，硬上限 160 行。
+- L2：必须与 L1 同目录，命名为 `.codex/MAPCODE-<领域>.md`；`<领域>` 使用小写英文、数字和连字符，例如 `MAPCODE-billing.md`、`MAPCODE-agent-routing.md`。
+- 禁止使用 `BUSINESS_MAP.md`、`docs/ai/`、`.codex/business/`、嵌套领域目录或其他前缀。禁止只改链接而保留错误路径的旧地图。
+- 小型项目不需要拆 L2 时，只保留 `.codex/MAPCODE.md`；需要拆分时仍必须保持扁平结构。
+
 ## 上下文路由
-
-按项目约定选择路径；没有约定时使用：
-
-- L0：`AGENTS.md` 等 AI 入口，只引用 L1。
-- L1：`docs/ai/BUSINESS_MAP.md`，保留任务路由、业务域摘要、全局不变量和冲突摘要，建议不超过 120 行，硬上限 160 行。
-- L2：`docs/ai/business/<领域>.md`，只保存对应领域的高价值业务语义。
 
 处理新任务时：
 
@@ -85,16 +96,16 @@ Mapcode 保存 Agent 难以从局部源码快速恢复的业务语义，并把�
 
 ## 校验
 
-使用项目实际地图路径运行：
+在项目根目录运行：
 
 ```bash
-scripts/check_map.sh <L1路径>
-scripts/check_map.sh --strict <L1路径>
+scripts/check_map.sh .codex/MAPCODE.md
+scripts/check_map.sh --strict .codex/MAPCODE.md
 ```
 
 普通模式报告缺失链接、失效锚点、过期领域包和冲突；严格模式将 `needs-review`、`stale`、`conflict` 作为失败，适合 CI。首次迁移旧地图时允许标记 `needs-review`，不得为了通过检查伪造已验证状态。
 
-`scripts/where.sh <文件> <符号>` 用于取得当前行号。规模检查必须传入项目实际地图路径，不能假定项目使用默认目录。
+`scripts/where.sh <文件> <符号>` 用于取得当前行号。`scripts/check_map.sh` 必须拒绝错误的 L1 文件名、嵌套 L2 和不符合 `MAPCODE-<小写领域>.md` 的领域包。
 
 ## 完成条件
 
