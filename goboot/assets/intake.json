@@ -1,0 +1,161 @@
+{
+  "title": "GoBoot 项目决策表",
+  "kicker": "Go + Vue · 纯本地",
+  "dek": "用于技术选型和架构设计，不要填写密码、Token、生产 DSN 或其他密钥。每题都可跳过或补充说明。",
+  "groups": [
+    {
+      "name": "目标与范围",
+      "fields": [
+        {
+          "key": "项目名称",
+          "type": "text",
+          "required": true,
+          "placeholder": "例如：Airball",
+          "levels": ["quick", "standard", "deep"]
+        },
+        {
+          "key": "核心目标",
+          "title": "这个项目解决什么问题，首个可交付闭环是什么",
+          "type": "textarea",
+          "required": true,
+          "placeholder": "描述目标用户、核心问题和第一阶段完成标准",
+          "levels": ["quick", "standard", "deep"]
+        },
+        {
+          "key": "期望交付",
+          "type": "radio",
+          "required": true,
+          "options": ["只做技术选型与架构方案", "方案确认后初始化基础项目", "初始化并完成首个业务闭环"],
+          "levels": ["quick", "standard", "deep"]
+        },
+        {
+          "key": "产品类型",
+          "type": "radio",
+          "required": true,
+          "options": ["面向客户的产品", "内部运营工具", "开放 API 或开发者平台", "内容或营销站点", "本地或桌面工具"],
+          "other": true,
+          "levels": ["quick", "standard", "deep"]
+        },
+        {
+          "key": "当前阶段",
+          "type": "radio",
+          "options": ["概念验证", "MVP", "新产品正式版", "旧系统重构或迁移"],
+          "levels": ["standard", "deep"]
+        },
+        {
+          "key": "核心能力",
+          "title": "首个版本真正需要哪些能力",
+          "type": "checkbox",
+          "options": ["登录与权限", "支付或计费", "文件或对象存储", "异步任务", "实时双向通信", "搜索", "AI 模型调用", "多租户", "SEO 或公开内容", "国际化"],
+          "other": true,
+          "levels": ["quick", "standard", "deep"]
+        }
+      ]
+    },
+    {
+      "name": "团队与规模",
+      "fields": [
+        {
+          "key": "团队规模",
+          "type": "select",
+          "required": true,
+          "options": ["1 人", "2-5 人", "6-15 人", "16-30 人", "30 人以上"],
+          "levels": ["standard", "deep"]
+        },
+        {
+          "key": "团队经验",
+          "title": "团队对核心技术的实际交付能力",
+          "type": "matrix",
+          "rows": ["Go", "Vue 与 TypeScript", "PostgreSQL", "Docker 与 CI/CD"],
+          "cols": ["不了解", "能维护", "能独立交付", "有生产经验"],
+          "levels": ["standard", "deep"]
+        },
+        {
+          "key": "首年规模",
+          "type": "select",
+          "options": ["少于 100 DAU，p99 低于 10 RPS", "100-1 万 DAU，p99 低于 100 RPS", "1 万-10 万 DAU，p99 低于 1000 RPS", "更高或流量突发明显", "暂不确定"],
+          "levels": ["standard", "deep"]
+        },
+        {
+          "key": "发布频率",
+          "type": "radio",
+          "options": ["随时或每天", "每周", "每月", "季度或更低", "暂不确定"],
+          "levels": ["deep"]
+        },
+        {
+          "key": "月度资源预算",
+          "type": "select",
+          "options": ["尽量为零", "500 元以内", "500-3000 元", "3000-20000 元", "预算不是主要约束", "暂不确定"],
+          "levels": ["deep"]
+        }
+      ]
+    },
+    {
+      "name": "技术边界",
+      "fields": [
+        {
+          "key": "前端形态",
+          "type": "radio",
+          "required": true,
+          "options": ["纯 SPA，不需要 SEO", "公开页面需要 SEO 或 SSR", "SPA 与公开内容混合", "暂不确定"],
+          "levels": ["standard", "deep"]
+        },
+        {
+          "key": "部署环境",
+          "type": "checkbox",
+          "options": ["单机或轻量云主机", "Docker", "Kubernetes", "Serverless", "私有化部署", "暂不确定"],
+          "other": true,
+          "levels": ["standard", "deep"]
+        },
+        {
+          "key": "数据特征",
+          "type": "checkbox",
+          "options": ["强事务关系数据", "大量 JSON 文档", "高并发写入", "全文检索", "审计留痕", "大文件", "时序数据", "暂不确定"],
+          "other": true,
+          "levels": ["deep"]
+        },
+        {
+          "key": "接口与集成",
+          "type": "checkbox",
+          "options": ["浏览器 REST API", "第三方开放 API", "Webhook", "内部服务调用", "WebSocket 或 SSE", "外部支付", "外部 AI 服务", "暂不确定"],
+          "other": true,
+          "levels": ["deep"]
+        },
+        {
+          "key": "安全与合规",
+          "type": "checkbox",
+          "options": ["个人信息", "支付或财务数据", "企业隔离", "数据驻留", "操作审计", "内容安全", "暂无特殊要求"],
+          "other": true,
+          "levels": ["deep"]
+        },
+        {
+          "key": "既有约束",
+          "title": "必须使用、明确禁用或无法替换的技术与环境",
+          "type": "textarea",
+          "placeholder": "例如：必须 PostgreSQL；部署在现有 Kubernetes；团队不使用云托管数据库",
+          "levels": ["quick", "standard", "deep"]
+        }
+      ]
+    },
+    {
+      "name": "验收与风险",
+      "fields": [
+        {
+          "key": "成功指标",
+          "title": "希望用哪些数字判断第一阶段完成",
+          "type": "textarea",
+          "placeholder": "例如：API p95 小于 300ms、移动端 LCP 小于 2.5s、关键流程成功率 99.9%；不确定可留空，由 GoBoot 推荐",
+          "levels": ["standard", "deep"]
+        },
+        {
+          "key": "主要风险",
+          "title": "你最担心哪些问题",
+          "type": "checkbox",
+          "options": ["开发周期", "团队学习成本", "云成本", "性能", "稳定性", "安全", "后续扩展", "供应商锁定"],
+          "other": true,
+          "levels": ["deep"]
+        }
+      ]
+    }
+  ]
+}

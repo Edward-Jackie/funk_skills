@@ -1,0 +1,4 @@
+interface:
+  display_name: "GoBoot"
+  short_description: "用本地问卷完成 Go + Vue 技术选型与项目架构设计"
+  default_prompt: "使用 $goboot 为我的新项目完成技术选型、架构设计和初始化。"
