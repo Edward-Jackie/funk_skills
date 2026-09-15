@@ -39,6 +39,7 @@
 | `Litreily-codex-skill-eastern-beauty-director` | 东方美人系 AI 绘画提示词：古风/图鉴/写真/Cosplay 展会摄影 |
 | `asmayaseen-browsing-with-playwright` | Playwright 浏览器自动化：导航、填表、截图、抓取 |
 | `autumnsgrove-docker-workflow` | Docker 容器化完整工作流：多阶段构建、compose、镜像优化 |
+| `DietrichGebert-ponytail` | 懒人资深开发模式：最少代码（YAGNI/标准库优先/一行赛五十行），含 audit/debt/gain/review 子技能，支持 20+ AI 工具 |
 | `autumnsgrove-git-advanced` | Git 高级操作：交互式变基、bisect、reflog 找回、分支策略 |
 | `baoyu-format-markdown` | Markdown 排版美化，输出 `*-formatted.md` |
 | `codingkaiser-shell-scripting` | Bash/Zsh 脚本编写、调试与命令行自动化 |
