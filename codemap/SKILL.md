@@ -1,293 +1,303 @@
 ---
 name: codemap
 description: |
-  Generate a CODEMAP.md file that supplements CLAUDE.md with task-based file indexes, parallel call chain diagrams, and core business module summaries.
-  Use this skill when: running /init on a codebase; user asks "where do I change X", "how does Y work", "show me the call flow", "梳理代码结构", "代码关系图", "调用链"; starting work on an unknown codebase; reviewing architecture before making changes; CLAUDE.md exists but you need deeper navigation into business logic.
-  Make sure to use this skill whenever the user mentions understanding code structure, architecture diagrams, call graphs, task-based navigation, or wants a visual map of how the codebase is organized — even if they don't explicitly name this skill.
-  This is NOT a CLAUDE.md replacement. CLAUDE.md covers commands, conventions, and project overview. CODEMAP.md covers: "to do task X, edit these files", "here's how data flows through the system", "these are the core business modules and what they do".
+  生成并维护 CODEMAP.md —— 一份供 AI 冷启动快速定位代码的任务型导航地图，包含任务索引、症状定位、假朋友清单、调用链图和证据分级。
+  何时使用：不要在每次任务开始前强制读取。当出现下列摩擦信号、而当前上下文中缺少对应逻辑时，动态加载最相关的领域包（CODEMAP-<模块>.md）：
+  - 同一个概念 grep 了两三轮，仍拿不到确定的入口点
+  - 找到了实现，但说不清「为什么这么写」——规则不在源码里
+  - 要改动一个没读过的模块，需要冷启动
+  - 需要确认「还有哪些地方依赖它」，但搜不全
+  - 涉及金额、权限、额度、库存、状态机、幂等、补偿这类高风险语义
+  - 出现方案层分歧（两种改法都讲得通），说明缺不可变量信息
+  也适用于用户直接说「梳理代码结构」「代码关系图」「调用链」「我要改 X 改哪儿」「这个报错从哪查」。
+  若 CLAUDE.md 已存在，本技能只补充它没覆盖的导航与数据流内容，不重复项目概览、命令和规范。
 trigger: /codemap
 ---
 
-# Code Map — Supplement CLAUDE.md with Navigation Maps
+# Code Map — 任务型代码导航地图
 
-Generate `CODEMAP.md` that helps Claude (and developers) quickly locate code for specific tasks and understand core business data flows. This is a **supplement to CLAUDE.md**, not a replacement — do not duplicate project overview, commands, or conventions that belong in CLAUDE.md.
+生成并维护 `CODEMAP.md`：让下一次冷启动的会话能**在两步内**从「我要干 X」走到「第一个该看的锚点」。
 
-## Design Principles
+它**补充** CLAUDE.md，不替代它。CLAUDE.md 管命令、约定、项目概览；CODEMAP.md 管「做 X 要改哪几个文件」「数据怎么流过系统」「这些坑已经有人踩过」。
 
-1. **Task-first navigation**: "To do X, edit these files" — developers (and AI) search by task, not by module
-2. **Parallel call chains via Mermaid**: Text can't show parallel branches well — use Mermaid subgraphs to show concurrent flows
-3. **Core modules, concise**: Each business module gets ≤ 3 lines: responsibility, key files, key functions
-4. **CLAUDE.md aware**: Read CLAUDE.md first, skip what it already covers, only add new navigation-level content
-5. **Function-name anchors, never line numbers**: Reference code as `file path + function/symbol name` only — **do not store line numbers**. A line number is a *derived, decaying* value: it's meaningless the moment code moves and it fails *silently* (points you at the wrong line, no error). The symbol name is stable and greppable. When you actually want a line to jump to, compute it **fresh** with `scripts/where.sh <file> <symbol>` rather than trusting a stored number.
+> 完整的证据标签与新鲜度规则见 [证据与新鲜度规范](references/evidence-model.md)。
 
-## Process
+---
 
-### Step 0: Check for CLAUDE.md
+## 首要原则：按需加载，不强制前置读取
 
-If `CLAUDE.md` exists in the project root (check `CLAUDE.md` and `.claude/CLAUDE.md`), read it first. Note what sections it already covers (project overview, commands, conventions, tech stack). When generating CODEMAP.md, **do not repeat any of these**. Skip project overview, skip commands, skip development conventions. Focus entirely on navigation and data flow.
+CODEMAP **不是一个必须通读的文档**，而是一个**卡住时可以拉取的缓存**。
 
-### Step 1: Discover
+因此：
 
-Find entry points, top-level structure, and identify the primary language/framework. Skip generated code (`.gen.go`, migrations, ORM output, etc.).
+1. **不做强制前置读。** 上面 description 里的摩擦信号命中任意一条，才去读对应领域包。没卡住就别读 —— 地图是省时间的工具，不是仪式。
+2. **按需加载要求地图「局部可读」。** 领域包必须能脱离 L1 独立读懂；L1 必须薄到「读 20 行就知道该不该继续往下钻」。
+3. **没读到不等于没记。** 因为没加载地图而走了弯路，是**检索失败**，不是地图的错。事后按最小粒度回填一条（症状定位或假朋友），让下次这条路变短。
+4. **读到的内容先看 `status`。** `stale` / `needs-review` / `conflict` 只能当线索，不得作为实现事实。
 
-### Step 2: Layered Mode Decision
+## 其余设计原则
 
-Count non-generated source files — run `scripts/count_sources.sh [project_root]` (bundled with this skill) for a deterministic count, per-language breakdown, and layering hint, instead of eyeballing it. Add project-specific generated paths via `CODEMAP_EXCLUDE='regex'`. The thresholds:
+5. **任务优先导航**：按「做 X 要改哪些文件」组织，而不是按目录树组织。
+6. **锚点只用 `文件路径 -> 符号名`，绝不存储行号**。行号一移动就**静默失效**；符号名稳定可 grep。需要行号时用 `scripts/where.sh <文件> <符号>` 现算。
+7. **核心模块每块不超过 3 行**：职责、关键文件、入口函数。
+8. **只记录源码推不出来、或推出来代价很大的内容**。目录树、完整接口清单、机械的 Controller→Service 罗列，交给你自己的 grep 就行。
+9. **地图是干活的副产品，本身不构成任务。** 不能因为「地图还没更新」就停下手上的活，也不能把「我更新了地图」当成交付物。
 
-- **≤ 50 files**: Use **single-layer mode** — generate everything in one `.claude/CODEMAP.md`
-- **> 50 files**: Use **two-layer mode** — generate a top-level `.claude/CODEMAP.md` with module table + task index + dependency graph, then create `.claude/CODEMAP-<module>.md` for each core business module's detailed call chains
+---
 
-Two-layer mode structure:
-```
-.claude/CODEMAP.md                    # Top-level: modules, task index, dependencies (no global change log)
-.claude/CODEMAP-auth.md               # auth module: call chains + that module's Change Log
-.claude/CODEMAP-billing.md            # billing module: call chains + that module's Change Log
-.claude/CODEMAP-proxy.md              # proxy module: call chains + that module's Change Log
-```
+## 产物结构
 
-### Step 3: Identify Core Business Modules
-
-Don't list every directory. Identify the **business modules** — groups of files that serve a specific domain purpose. For each:
-
-- **Responsibility**: 1 line what it does
-- **Key files**: 2-4 file paths, each paired with its entry function name (no line numbers)
-- **Key functions**: 2-3 function names that are the entry points
-
-Example:
-```
-| 模块 | 职责 | 关键文件 | 入口函数 |
-|------|------|---------|---------|
-| AI 聊天 | 多模型路由 + SSE 转发 | `controller/aichat/default.go`, `service/aichatService/default.go`, `lib/utils/httputil/httputil.go` | `Completions()`, `AiChatFactory()`, `FlowHttpPost()` |
+```text
+.claude/CODEMAP.md                    # L1：模块表 + 任务索引 + 症状定位 + 依赖图。上限 120 行
+.claude/CODEMAP-<模块>.md             # L2：该模块的调用链 + 假朋友 + 该模块自己的变更记录
+.claude/CODEMAP-changelog.md          # 单层模式下的独立变更记录
 ```
 
-### Step 4: Build Task Index
+全部**扁平同级**于 `.claude/`，不接受嵌套目录。`<模块>` 用小写英文、数字、连字符，如 `CODEMAP-billing.md`。
 
-For each major task a developer might want to do, list the files to edit — path + the **function/symbol** to touch (no line numbers) — plus **preconditions** and **pitfalls**:
+---
+
+## 流程
+
+### Step 0：先看 CLAUDE.md
+
+若 `CLAUDE.md` 或 `.claude/CLAUDE.md` 存在，先读。记下它已覆盖的部分（项目概览、命令、约定、技术栈）。
+生成 CODEMAP 时**不要重复这些内容**，空间全部留给导航和数据流。
+若不存在，照常生成，并在 Step 7 建议创建。
+
+### Step 1：发现
+
+找入口点、顶层结构、主语言/框架。跳过生成代码（`.gen.go`、迁移文件、ORM 产物）。
+
+### Step 2：确定分层模式
+
+跑 `scripts/count_sources.sh [项目根]` 拿确定性的文件数，而不是目测：
+
+- **≤ 50 个文件** → 单层模式，全部写进 `.claude/CODEMAP.md`
+- **> 50 个文件** → 两层模式，L1 放模块表 + 任务索引 + 依赖图，每个核心业务模块单独一个 `CODEMAP-<模块>.md`
+
+项目专属的生成路径用 `CODEMAP_EXCLUDE='正则'` 追加排除。
+
+### Step 3：识别核心业务模块
+
+不要列出每个目录。识别**业务模块** —— 一组为某个领域目的服务的文件。每个模块写：职责一行、关键文件 2–4 个（各配入口函数名）、关键函数 2–3 个。
+
+### Step 4：建任务索引
+
+对每个「开发者可能想做的事」，列出要改的文件（路径 + **符号名**）+ 前置条件 + 陷阱。
 
 ```markdown
-## Task Index
+### 新增一个 AI 供应商
+1. `internal/service/aichatService/default.go` → `AiChatFactory()` —— 加 case，实现 `ChatStreamModel` 接口
+2. `lib/utils/httputil/httputil.go` → `FlowHttpPost()` —— 加 switch 分支，写 `*HandleStreamResponse()`
 
-### To add a new AI provider
-1. `internal/service/aichatService/default.go` → `AiChatFactory()` — add case, implement `ChatStreamModel` interface
-2. `lib/utils/httputil/httputil.go` → `FlowHttpPost()` — add switch case, write `*HandleStreamResponse()`
-3. `internal/consts/aiModel.go` → `ModelMapping` — add model constant, update `IsBailianModel()` if needed
-
-**Precondition**: Confirm upstream API is OpenAI-compatible. If not, need custom request/response structs.
-**Pitfall**: `FlowHttpPost` has no default fallback — new cases must be explicitly listed, or they fall through to `BailianHandleStreamResponse`.
+**前置条件**：确认上游 API 兼容 OpenAI 协议；不兼容则需要自定义请求/响应结构体。
+**陷阱**：`FlowHttpPost` 没有 default 兜底 —— 新分支必须显式列出，否则会落到 `BailianHandleStreamResponse`。
 ```
 
-Build this by tracing: where does the factory/registry live? where does the handler live? where are the types defined? For each task, ask: what must be true before this works? what edge case has burned someone before?
+建索引的方法是**顺着代码追**：工厂/注册表在哪？handler 在哪？类型定义在哪？
+对每个任务都问：**要让它跑通，必须先成立什么？有什么边界曾经坑过人？**
 
-### Step 5: Trace Call Chains — Control Flow + Data Flow
+### Step 5：症状定位（反向导航）
 
-Split call chains into two distinct types:
+任务索引是**正向**的（我要做功能 X）。排障是**反向**的（这个现象从哪查）—— 现有结构套不进去，单独成段。
 
-**Control Flow** (谁调谁 — explicit function calls):
+把**可观测的现象**映射到首个锚点：
+
+```markdown
+## 症状定位
+
+| 现象 | 首个锚点 | 常见误判 |
+| --- | --- | --- |
+| 接口返回 401 但 token 没过期 | `identity/service.go -> AuthenticateSession` | 误以为是 aiproxy 侧吊销，实际是本地会话版本号 |
+| SSE 中途断流且无错误码 | `httputil.go -> FlowHttpPost` | 误以为上游超时，实际是 flush 缺失 |
+```
+
+输入端是**故障现象**，这是排障时最省时间的地方。
+
+### Step 6：假朋友清单（负向导航）
+
+记录「**看着像但别去**」的地方。这类知识源码推不出来（推出来要读完全部才能确认），而且下次一定还会再踩。
+
+```markdown
+## 假朋友
+
+- `lib/utils/legacy_ai.go -> ChatV1()` —— 名字像主链路，实际已废弃，仅历史灰度在用。真正的主链路是 `aichatService/default.go`。
+- `internal/service/user/` 下有个 `SyncProfile()`，只服务于一次性迁移脚本，不要在此扩展。
+```
+
+**硬约束：必须限量、必须真踩过。** 这里只收「确认走过弯路」的条目，否则会退化成抱怨垃圾桶。
+
+### Step 7：追调用链
+
+分两类，别混：
+
+**控制流**（谁调谁 —— 显式函数调用）：
+
 ```mermaid
 flowchart TD
     A[CryptoCheck] --> B[Completions]
     B --> C[AiChatFactory]
-    C --> D[BailianApi.ChatProcess]
-    D --> E[FlowHttpPost]
-    E --> F[SSE Forward]
+    C --> D[FlowHttpPost]
 ```
 
-**Data Flow** (数据怎么变 — where data is transformed):
+**数据流**（数据怎么变 —— 每一步的形态转换）：
+
 ```mermaid
 flowchart TD
     A[加密请求体] --> B[SM4解密→明文JSON]
     B --> C[解析为CompletionsReq]
-    C --> D[注入system prompt+城市]
-    D --> E[序列化为DashScope请求]
-    E --> F[SSE逐帧→AiOutput→flush]
-    F --> G[客户端收到标准化响应]
+    C --> D[注入system prompt]
+    D --> E[SSE逐帧→AiOutput→flush]
 ```
 
-**Parallel branches** (async/goroutine): Use Mermaid subgraphs or suffix labels like `G1[UpdateChatLog async]`.
+**追踪规则（重要，这是最容易产生幻觉的地方）：**
 
-**Tracing rules**:
-- **Only trace explicit calls**: function A calls function B, switch case dispatch, interface implementation. Do NOT trace implicit calls (ORM hooks, decorators, reflection, event bus subscribers, middleware auto-registration).
-- **If you can't find an explicit call, don't guess**: Omit that link rather than infer it. Better a shorter accurate chain than a longer misleading one.
-- **Note gaps**: If a known runtime behavior (e.g., middleware order, ORM query) has no explicit source-level call, add a "未追踪" note under the diagram.
+- **只追显式调用**：函数 A 调函数 B、switch 分支派发、接口实现。**不要追隐式调用**（ORM 钩子、装饰器、反射、事件总线订阅、中间件自动注册）。
+- **找不到显式调用就不要猜**：宁可链条短而准确，也不要长而误导。省略那一段，并写「未追踪」说明。
+- **每张图 ≤ 12 个节点**。这是可读性启发式，不是铁律：若一条流是**单一线性管道**或**单一决策树**（分支共享同一入口条件，拆开会失去意义），保持完整并加 `<!-- no-split: 原因 -->` 标记。但超过约 18 个节点就说明流程本身太缠，该简化的是代码。
+- **每张图后必须有证据标签**：`<!-- evidence: source-verified -->`，另附盲区说明。
 
-Each diagram ≤ 12 nodes — split at logical boundaries if needed. The 12-node limit is a readability heuristic, not a hard law: some flows are one cohesive chain (a linear pipeline where each step feeds the next) or a single decision tree whose branches only make sense together. Splitting those forces an artificial seam that hurts comprehension more than the length does. When a diagram is genuinely atomic like this, keep it whole and tag it with a no-split marker (see below) so future runs don't re-split it. Even then stay reasonable — past ~18 nodes the diagram itself is telling you the real flow is too tangled, and the fix is to simplify the code or the abstraction, not just the picture.
+### Step 8：写出文档
 
-**Confidence labels**: After EACH diagram, add a line with confidence level AND a verification hint if not high:
-- `<!-- confidence: high — explicit static calls only -->`
-- `<!-- confidence: medium — inferred from naming convention → verify: grep "Register" in router/ to confirm handler binding -->`
-- `<!-- confidence: low — inferred from runtime behavior, not found in source → verify: check middleware registration order in main.go -->`
+写到 `.claude/CODEMAP.md`（不存在则创建 `.claude/`）。**先备份**已有文件到 `.claude/CODEMAP.md.bak`，然后：
 
-This tells future Claude instances not just which diagrams to trust, but **where to verify** before acting on them.
+- **保留所有 `<!-- manual: keep -->` 块，逐字不动。**
+- 只重建自动生成的段落（模块表、调用链、依赖图）。
+- 若发现人工写的陷阱/铁律**没被包在保护块里**，**把它包起来**，而不是让重扫冲掉。
+- **禁止整文件覆盖**，哪怕地图又大又烂。增量改。
 
-**No-split marker**: When you deliberately keep a diagram whole despite exceeding the node limit, record why on the same comment-line style as confidence:
-- `<!-- no-split: linear ingest→validate→enrich→persist pipeline; splitting would orphan the data dependency between steps -->`
+文档结构（单层模式）：
 
-This is a signal to future runs (and the trimming rules below): the size was a judgment call, not an oversight — respect it unless the underlying flow itself changed. A no-split note without a real reason is just an excuse to dump a tangled diagram; if you can't name why the flow is atomic, it probably isn't, and you should split it.
-
-### Step 6: Generate the Document
-
-Write to `.claude/CODEMAP.md` in the project root. Create the `.claude/` directory if it doesn't exist.
-
-**Preserve human-authored content.** A live CODEMAP is co-maintained: people hand-add hard-won Pitfalls, invariants ("铁律"), and Preconditions that cannot be re-derived from source. When `.claude/CODEMAP.md` already exists, **back it up to `.claude/CODEMAP.md.bak` first**, then **never delete or rewrite anything inside a manual-protection marker**:
-
-```
-<!-- manual: keep — hand-authored, do not auto-rewrite -->
-... human notes / pitfalls / invariants ...
-<!-- /manual -->
-```
-
-Regenerate only the auto-traced sections (module table, call chains, dependency graph) *around* these blocks. When you add a Pitfall or invariant yourself that future runs must keep, wrap it in the same marker.
-
-### Step 7: Wire into CLAUDE.md
-
-After writing CODEMAP.md, **ensure CLAUDE.md references it** so future Claude instances load it automatically.
-
-Read the project's `CLAUDE.md` (root or `.claude/CLAUDE.md`). Check if it already contains a line instructing to read `.claude/CODEMAP.md`. If not, add one right after the project overview / before the first content section. The line should be:
-
-```
-**Before any code editing task, read `.claude/CODEMAP.md`** — it contains task-based file indexes, call chain diagrams, and module entry points you need to be productive.
-```
-
-Do NOT overwrite CLAUDE.md — only append this reference if it is missing.
-
-### Step 8: Spot-check before trusting
-
-Tracing call chains from source is exactly where an LLM hallucinates, so don't ship on self-rated confidence alone — **verify a sample before considering the map done**:
-
-1. **High-confidence edges**: for every diagram tagged `confidence: high`, pick at least one edge (caller → callee) and confirm the call literally exists — `grep` the callee inside the caller's file/function. If it isn't there, fix the edge or downgrade the label. A `high` you never checked is a `medium` in disguise.
-2. **Task Index symbols**: for each entry, confirm the named function/symbol still exists in the cited file (`scripts/where.sh <file> <symbol>` locates it). Drop entries whose symbol is gone.
-3. **no-split markers**: confirm each `<!-- no-split -->` reason still matches the current flow.
-
-Record what you actually checked under **Last Updated → Update checklist**, so the next run knows what was verified vs. assumed. Catching one fabricated call here is worth more than tracing ten more chains you never verify.
-
-The output document follows this structure.
-
-For **single-layer mode**:
 ```markdown
-# [Project Name] — Code Map
+# [项目名] — Code Map
 
-**Location**: `.claude/CODEMAP.md`
-Generated: [date]
+<!-- codemap-meta
+status: current
+verified-at: [日期]
+verified-commit: [短 commit]
+-->
 
-## Core Business Modules
+## 核心业务模块
+[表格：模块 | 职责 | 关键文件 | 入口函数，每模块 ≤ 3 行，最多 8 个]
 
-[Table: module | responsibility | key files | entry functions — ≤ 3 lines each, max 8 modules]
+## 任务索引
+### [任务 1]
+[编号列表：文件路径 + 要动的符号名 —— 不写行号]
+**前置条件**：...
+**陷阱**：...
 
-## Task Index
+## 症状定位
+[表格：现象 | 首个锚点 | 常见误判]
 
-### [Task 1: e.g., "Add a new AI provider"]
-[Numbered list of files to edit + the function/symbol to touch in each — no line numbers]
-
-### [Task 2]
-...
-
-## Call Chains
-
-### [Flow 1: e.g., "Chat request — control flow"]
-
+## 调用链
+### [流程 1]
 ```mermaid
 flowchart TD
-    [explicit function calls, ≤ 12 nodes]
+    [显式调用，≤ 12 节点]
 ```
+<!-- evidence: source-verified — 仅显式静态调用 -->
+<!-- 盲区: [这条链没覆盖什么 —— 无重试机制、上游超时直接 502、此路径无集成测试] -->
 
-<!-- confidence: high — explicit static calls only -->
-<!-- blind spots: [what this chain doesn't cover — e.g., no retry mechanism, upstream timeout returns 502 directly, no integration test for this path] -->
+## 冲突台账
+[表格，见 references/evidence-model.md。无冲突则写「无」]
 
-### [Flow 2: e.g., "Chat request — data flow"]
-
+## 模块依赖
 ```mermaid
 flowchart TD
-    [data transformations at each step, ≤ 12 nodes]
+    [紧凑依赖图，≤ 12 节点]
+```
+[简述：谁是枢纽、谁是叶子、有无循环依赖]
 ```
 
-<!-- confidence: medium — inferred from naming convention → verify: grep "Register" in router/ -->
-<!-- blind spots: [e.g., middleware execution order not traced, Flume async reporting lifecycle unknown] -->
+两层模式下，L1 省略调用链，改为链接到各模块文件；每个 `CODEMAP-<模块>.md` 内含该模块的详细图 + **自己的变更记录段 + 自己的假朋友段**。
 
-### [Flow 3: e.g., "Model routing decision tree"]
+### Step 9：接进 CLAUDE.md
 
-```mermaid
-flowchart TD
-    [decision tree with branching — a tree whose branches share one entry condition can stay whole past 12 nodes if tagged no-split]
-```
+确保 CLAUDE.md 引用它，这样未来会话能自动得知地图存在。
 
-<!-- confidence: high — explicit switch case -->
-<!-- no-split: single routing decision tree; branches share the same entry condition and lose meaning if separated -->
-
-## Module Dependencies
-
-```mermaid
-flowchart TD
-    [compact dependency graph — ≤ 12 nodes, split into subgraphs if needed]
-```
-
-[Brief: which modules are hubs, which are leaves, any notable circular dependencies]
-
-## Change Log
-
-Not kept in this file — see **"Where the Change Log lives"** below. The main `CODEMAP.md` carries navigation only; the log is offloaded to `CODEMAP-changelog.md` (single-layer) or each `CODEMAP-<module>.md` (two-layer).
-
-## Last Updated
-
-- **Generated**: [date]
-- **Codebase state**: [brief description]
-- **Known gaps**: [what wasn't covered]
-- **Update checklist**: [items to check next time the skill runs]
-```
-
-For **two-layer mode**, the top-level `.claude/CODEMAP.md` omits call chains (replaced by links to per-module files), and each `.claude/CODEMAP-<module>.md` contains that module's detailed diagrams **plus that module's own Change Log section**.
-
-## Where the Change Log lives
-
-The Change Log is **not** kept in the main `CODEMAP.md`. The main file is read before every coding task (for navigation), but the log is only consulted when re-running the skill or auditing history — so it's offloaded to keep navigation reads lean:
-
-- **single-layer** → one file `.claude/CODEMAP-changelog.md`
-- **two-layer** → no global log; each business change is recorded in **its module's own** `.claude/CODEMAP-<module>.md` (e.g. a billing change → the `## Change Log` section at the bottom of `CODEMAP-billing.md`). A cross-cutting change is logged under whichever module owns its entry point.
-
-Each log file/section uses this format and rules:
+读项目的 `CLAUDE.md`（根目录或 `.claude/`）。若其中没有指向 `.claude/CODEMAP.md` 的行，就加一句（**只追加，不覆盖**）：
 
 ```
-| Date | Business Area | Change |
-|------|---------------|--------|
-| 2026-05-13 | Initial | CODEMAP created — AI chat routing, billing, agent system |
+**当遇到不熟悉的模块，或在某个概念上反复搜索仍找不到确定入口时，读取 `.claude/CODEMAP.md`** —— 它包含任务型文件索引、症状定位、调用链和模块入口，能显著减少摸索时间。
+```
+
+注意措辞是**「卡住时读」而非「动手前必读」** —— 强制前置读会被绕过或变成形式主义，只有在真正缺少上下文时加载才有效。
+
+### Step 10：校验（不再依赖自觉抽查）
+
+**跑脚本，不要靠自己打分。**
+
+```bash
+scripts/check_map.sh .claude/CODEMAP.md
+scripts/check_map.sh --strict .claude/CODEMAP.md   # CI 用
+```
+
+它做四件事，都是机械可判定的：
+
+1. **失效锚点** —— 引用的文件或符号是否还实际存在（用 `where.sh` 做定义式匹配，不是「随便出现过」）
+2. **条目级过期** —— 逐条比对 `verified-commit..HEAD`，**只报告受影响的条目**，未受影响的仍标为可用
+3. **冲突计数** —— 台账里还有多少条未决策
+4. **尺寸体检** —— L1 超 120 行、模块包超 200 行即告警
+
+`--strict` 把「失效锚点 / 过期条目 / 冲突 / 非 `current` 状态 / 未纳入 Git」判为失败，可直接挂 CI。
+
+**首次迁移旧地图允许标 `needs-review`，但不得为了通过检查而伪造已验证状态。**
+
+---
+
+## 变更记录
+
+变更记录**不放**在 L1（L1 每次任务都会被加载，而记录只在重跑技能或审计历史时才看）：
+
+- **单层模式** → `.claude/CODEMAP-changelog.md`
+- **两层模式** → 无全局记录；每个业务变更记在**它所属模块**的 `CODEMAP-<模块>.md` 末尾。跨模块变更记在拥有其入口点的那个模块下。
+
+格式与规则：
+
+```
+| 日期 | 业务域 | 变更 |
+| --- | --- | --- |
+| 2026-05-13 | Initial | CODEMAP 创建 —— AI 聊天路由、计费、Agent 系统 |
 | 2026-06-01 | 计费 | PostConsume 新增企业成员共享池扣减分支（billing_service.go PostConsume） |
 ```
 
-**Rules:**
-- **Change**: state what business logic changed and **name the core function/symbol** whose behavior changed ("PostConsume 新增企业成员共享池扣减分支") — pin the delta to an entry point. **Name the function, never a line number**: the log is historical, so a line number recorded today is meaningless once the code moves, whereas a function name stays greppable. Never log the analysis action ("traced X", "analyzed Y").
-- **Keep the most recent 20 entries per log file/section**; when trimming, drop oldest first — older ones fold into that file's `Last Updated` summary.
-- Wrap a milestone entry in `<!-- manual -->` to exempt it from trimming.
+- **变更**要写清「什么业务逻辑变了」，并**点名行为变化的核心函数名**。写函数名，**绝不写行号**（历史记录里的行号今天写下、明天就无意义，而函数名永远可 grep）。
+- **不要记录分析动作**（「分析了 X」「追踪了 Y」「更新了地图」）—— 那是动作，不是变化。
+- 每个记录文件/段落**保留最近 20 条**，超出丢最旧的（折叠进 `Last Updated` 摘要）。
+- 里程碑条目用 `<!-- manual -->` 包裹可豁免裁剪。
 
-## Managing CODEMAP Growth
+---
 
-CODEMAP.md grows over time as the project evolves. To prevent context bloat:
+## 控制地图膨胀
 
-**Change Log with delta comparison**: Before analyzing, read the last entry of the relevant log — `.claude/CODEMAP-changelog.md` (single-layer) or the `## Change Log` section of each `CODEMAP-<module>.md` (two-layer). Compare the current codebase against what was recorded last time. Append one row per changed business area capturing the **difference** — new functions, new routes, modified rules, removed features. If a business area is unchanged, write nothing for it. Only record actual deltas, not re-tracing the same code.
+地图随项目演进会变大，而它每次会话都会被加载，所以**薄是硬指标**。
 
-Example of good delta entries (name the function, never a line number):
-- "AiChatFactory 新增 `OpenRouter` case，handler 为 `httputil.go` 的 `OpenRouterHandleStreamResponse`"
-- "`billing_service.go` PostConsume 新增企业成员共享池扣减分支"
-- "CompletionsV2 IntentType 路由新增 case 7 → 语音模型"
+**先做增量比对**：动手前读相关记录的**最后一条**，把当前代码库和上次记录对照，**只写差异**。某业务域没变就不写。只有真实 delta 才记，不要重复追同一段代码。
 
-Example of bad entries:
-- "分析了 AiChatFactory 函数"（这是动作，不是变化）
-- "CODEMAP 更新了"（这是空话，没说变了什么）
+好的 delta 条目（点名函数，不写行号）：
+- `AiChatFactory 新增 OpenRouter case，handler 为 httputil.go 的 OpenRouterHandleStreamResponse`
+- `billing_service.go PostConsume 新增企业成员共享池扣减分支`
 
-**Section-aware threshold**: When `.claude/CODEMAP.md` exceeds 200 lines, trim as below — but **anything inside a `<!-- manual -->` block is exempt from every trimming rule here**:
-1. **Change Log**: now lives in `CODEMAP-changelog.md` / per-module files, not here — trim each to the most recent 20 entries (oldest fold into that file's `Last Updated` summary).
-2. **Call Chains**: If a single flow diagram exceeds 15 nodes, split it into two diagrams (sync vs async) — **unless it carries a `<!-- no-split: ... -->` marker**, in which case leave it whole and trust the recorded reason (only re-evaluate if the underlying flow changed). If a module has > 3 diagrams in total, move that module to a separate `CODEMAP-<module>.md` file and replace with a link.
-3. **Core Business Modules**: Never trim this table — it's the primary navigation anchor. If > 10 modules, split rarely-used ones into a "扩展模块" subsection.
-4. **Task Index**: Keep all entries. If an entry references a deleted file, remove it.
-5. **Module Dependencies**: Keep one diagram. Never duplicate.
+坏的条目：
+- `分析了 AiChatFactory 函数`（动作不是变化）
+- `CODEMAP 更新了`（空话）
 
-**Never full-rewrite over human content**: Even when `.claude/CODEMAP.md` is large or stale, do NOT blow the whole file away. Always work incrementally: back up to `.claude/CODEMAP.md.bak`, keep every `<!-- manual -->` block **verbatim**, and re-scan only the auto-generated sections (module table, call chains, dependency graph) around them. If while re-scanning you spot a human-added Pitfall/invariant that isn't yet wrapped in a `<!-- manual -->` block, **wrap it in one rather than letting the re-scan drop it** — don't silently overwrite knowledge that's expensive to recover. If the auto-generated sections themselves have grown unwieldy, split modules into `CODEMAP-<module>.md` rather than deleting.
+**阈值与裁剪**（`<!-- manual -->` 块豁免一切裁剪规则）：
 
-**Auto-trigger via script**: On every run, run `scripts/check_size.sh [.claude] [200]` to see which `CODEMAP*.md` files exceed the threshold. For each flagged OVER: move detailed call chains into `CODEMAP-<module>.md`, and keep Change Log entries in `CODEMAP-changelog.md` (single-layer) or the owning `CODEMAP-<module>.md` (two-layer), ≤ 20 per log. The script only measures size — what content moves where is your call from its output, and `<!-- manual -->` blocks always stay put.
+1. **变更记录** —— 裁到最近 20 条。
+2. **调用链** —— 单张图超 15 节点则拆成同步/异步两张，**除非它带 `<!-- no-split: ... -->` 标记**（这时尊重记录的理由，只在底层流程真的变了时才重估）。一个模块超过 3 张图，就把它整体移到独立模块包。
+3. **核心业务模块表** —— **永不裁剪**，它是主导航锚点。超过 10 个模块时，把冷门的拆进「扩展模块」子节。
+4. **任务索引** —— 保留全部条目；若某条引用的文件已删除，删掉该条。
+5. **模块依赖图** —— 保留一张，永不重复。
 
-## Tips
+跑 `scripts/check_size.sh .claude 200` 可快速看哪些文件超标。
 
-The Process steps above are the detail; these are the four things that most often get dropped:
+---
 
-- **Never repeat CLAUDE.md**: skip anything it already covers (overview, commands, conventions); spend the space on navigation and data flow.
-- **Task Index is the most important section**: developers search by task first — keep it precise (file path + function name) with preconditions and pitfalls, not just "edit these files".
-- **Anchor on file path + function name, never a line number**: write `controller/aichat/default.go → Completions()`. A stored line number decays the moment code moves; when you want a line, compute it fresh with `scripts/where.sh <file> <symbol>`.
-- **Add blind spots**: after each Call Chain, note what it does NOT cover (no retry, no test, upstream-timeout behavior) — the gaps matter as much as the chain.
+## 四个最常被丢掉的重点
+
+- **别重复 CLAUDE.md**：概览、命令、约定都跳过，把空间全给导航和数据流。
+- **任务索引是最重要的段落**：开发者按任务搜索，索引要精确到「路径 + 符号名」，并带前置条件和陷阱，不能只写「改这几个文件」。
+- **锚点永远是「路径 + 符号名」，永不写行号**：写 `aichat/default.go → Completions()`。要行号时用 `where.sh` 现算。
+- **给每条链写明盲区**：没有重试、没有测试、上游超时怎么表现 —— 缺口和链条本身一样重要。
