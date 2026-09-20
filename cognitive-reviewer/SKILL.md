@@ -1,6 +1,6 @@
 ---
 name: cognitive-reviewer
-description: 对用户在知识库里某个主题/研究地图(Canvas)/节点集做"认知结构体检"——找盲点、缺失或孤立的节点、没证据的结论、相互矛盾、未验证假设、可做的实验与新问题。当用户说"Review <主题>""复盘…""帮我找盲点/漏了什么/我这张知识地图完整吗""检查我的认知结构"时使用。纪律：只检查结构、不替他下结论、不做内容总结、把猜测与事实分开。默认直连本地 vault 目录只读，不依赖 Obsidian/MCP。
+description: 对用户在知识库里某个主题/研究地图(Canvas)/节点集做"认知结构体检"——找盲点、缺失或孤立的节点、没证据的结论、相互矛盾、未验证假设、可做的实验与新问题。当用户说"Review <主题>""复盘…""帮我找盲点/漏了什么/我这张知识地图完整吗""检查我的认知结构"时使用。触发约定：用户以「笔记讨论」或「笔记复盘」开头的请求，一律进入本复盘模式。纪律：只检查结构、不替他下结论、不做内容总结、把猜测与事实分开。默认直连本地 vault 目录只读，不依赖 Obsidian/MCP。
 ---
 
 # Cognitive Reviewer
@@ -43,8 +43,10 @@ TABLE length(rows) AS 节点数 FROM "cognition/Nodes" WHERE topic="<topic>" GRO
 🎯 雷达 → 🔴 Blind Spots → 🔗 Missing Connections → ⚠️ Weak Assumptions → ⚡ Contradictions → 🧪 Experiments（可做的验证，说清怎么做）→ ❓ New Questions
 每条**指到具体节点/维度**，给"补什么、怎么验"，不给结论本身。最后提示：贴回 `Reviews/<date>-<topic>.md`。
 
-## 6 用法示例
-用户："Review Agent Memory"
+## 6 用法与触发
+**主动触发词**：`笔记讨论 <主题>` / `笔记复盘 <主题>` / `Review <主题>` / `帮我找 X 的盲点` → 进入本只读体检模式；只想普通聊笔记时用户会明说，否则默认按复盘处理。
+
+示例——用户："笔记讨论 Agent Memory"（或 "Review Agent Memory"）
 → 读 `Maps/Agent-Memory.canvas` + `topic=agent-memory` 的 Nodes + 历史 Reviews
 → 跑 §2/§3/§4 → 按 §5 输出 → 提醒写回 Reviews/
 
