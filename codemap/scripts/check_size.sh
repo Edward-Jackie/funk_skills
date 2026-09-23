@@ -1,48 +1,38 @@
 #!/usr/bin/env bash
-# check_size.sh — report which CODEMAP*.md files exceed the line threshold,
-# so the skill knows what to split into per-module files / offload to the changelog.
-#
-# Usage:
-#   scripts/check_size.sh [DIR] [THRESHOLD]
-#     DIR        directory holding the CODEMAP files (default: .claude)
-#     THRESHOLD  line limit before a file should be split (default: 200)
-#
-# It only REPORTS sizes. Deciding what content moves where — detailed call chains
-# into CODEMAP-<module>.md, Change Log entries into CODEMAP-changelog.md (single-layer)
-# or the owning CODEMAP-<module>.md (two-layer) — is a judgment call the skill (Claude)
-# makes from this report; a shell script can't understand the business content.
+# Report role-aware CODEMAP size limits. This script never edits maps.
 
 set -uo pipefail
 
-DIR="${1:-.claude}"
-THRESHOLD="${2:-200}"
+DIR="${1:-.map}"
+INDEX_LIMIT="${2:-120}"
+DOMAIN_LIMIT="${3:-240}"
 
 shopt -s nullglob
 files=("$DIR"/CODEMAP*.md)
 if [ ${#files[@]} -eq 0 ]; then
-  echo "No CODEMAP*.md found under '$DIR'."
+  echo "'$DIR' 下没有 CODEMAP*.md。"
   exit 0
 fi
 
 over=0
-printf '%-44s %7s  %s\n' "FILE" "LINES" "STATUS"
-printf '%-44s %7s  %s\n' "----" "-----" "------"
-for f in "${files[@]}"; do
-  n="$(wc -l < "$f" | tr -d ' ')"
-  if [ "$n" -gt "$THRESHOLD" ]; then
-    printf '%-44s %7s  OVER (> %s)\n' "$f" "$n" "$THRESHOLD"
+printf '%-44s %7s %7s  %s\n' "文件" "行数" "上限" "状态"
+printf '%-44s %7s %7s  %s\n' "----" "----" "----" "----"
+for file in "${files[@]}"; do
+  lines="$(wc -l < "$file" | tr -d ' ')"
+  limit="$DOMAIN_LIMIT"
+  [ "$(basename "$file")" = "CODEMAP.md" ] && limit="$INDEX_LIMIT"
+  if [ "$lines" -gt "$limit" ]; then
+    printf '%-44s %7s %7s  超出\n' "$file" "$lines" "$limit"
     over=$((over + 1))
   else
-    printf '%-44s %7s  ok\n' "$f" "$n"
+    printf '%-44s %7s %7s  正常\n' "$file" "$lines" "$limit"
   fi
 done
 
 echo
 if [ "$over" -gt 0 ]; then
-  echo "$over file(s) over the ${THRESHOLD}-line threshold. Offload, keeping <!-- manual --> blocks verbatim:"
-  echo "  - detailed call chains  -> CODEMAP-<module>.md"
-  echo "  - Change Log entries    -> CODEMAP-changelog.md (single-layer)"
-  echo "                             or the owning CODEMAP-<module>.md (two-layer), <=20 entries each"
-else
-  echo "All within threshold — no split needed."
+  echo "$over 个文件超限。拆分领域或删除可从源码即时恢复的内容；保留 manual 块。"
+  exit 1
 fi
+
+echo "所有地图均在限制内。"

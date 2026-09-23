@@ -1,0 +1,117 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["PyYAML>=6.0.2,<7"]
+# ///
+"""Render one validated Codemap Graph YAML into its declared Mermaid view."""
+
+from __future__ import annotations
+
+import hashlib
+import os
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+
+def escaped(value: Any) -> str:
+    return str(value).replace("\\", "\\\\").replace('"', "\\\"").replace("\n", " ")
+
+
+def mermaid_id(value: str) -> str:
+    return "n_" + value.replace("-", "_")
+
+
+def node_line(node: dict[str, Any]) -> str:
+    node_id = mermaid_id(node["id"])
+    label = escaped(node["label"])
+    kind = node["kind"]
+    if kind in {"entry", "terminal", "state"}:
+        shape = f'{node_id}(["{label}"])'
+    elif kind == "decision":
+        shape = f'{node_id}{{"{label}"}}'
+    elif kind == "store":
+        shape = f'{node_id}[("{label}")]'
+    else:
+        shape = f'{node_id}["{label}"]'
+    return f"    {shape}"
+
+
+def render(source: Path, graph: dict[str, Any]) -> str:
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    lines = [
+        f"%% Generated from {source.name}; do not edit.",
+        f"%% source-sha256: {digest}",
+        "flowchart TD",
+    ]
+
+    levels: dict[int, list[dict[str, Any]]] = {}
+    for node in graph["nodes"]:
+        levels.setdefault(node["level"], []).append(node)
+    for level in sorted(levels):
+        lines.append(f'  subgraph level_{level}["Level {level}"]')
+        for node in levels[level]:
+            lines.append(node_line(node))
+        lines.append("  end")
+
+    for edge in graph["edges"]:
+        source_id = mermaid_id(edge["from"])
+        target_id = mermaid_id(edge["to"])
+        parts = []
+        if edge.get("label"):
+            parts.append(str(edge["label"]))
+        if edge["condition"] != "always":
+            parts.append(str(edge["condition"]))
+        label = " / ".join(parts).replace("|", "/")
+        connector = f' -->|"{escaped(label)}"| ' if label else " --> "
+        lines.append(f"  {source_id}{connector}{target_id}")
+
+    sub_nodes = [mermaid_id(node["id"]) for node in graph["nodes"] if node.get("sub")]
+    if sub_nodes:
+        lines.append("  classDef hasSub stroke-dasharray: 5 3")
+        lines.append(f"  class {','.join(sub_nodes)} hasSub")
+
+    for node in graph["nodes"]:
+        evidence = node["evidence"]
+        lines.append(f"  %% node {node['id']}: {evidence['level']} - {escaped(evidence['note'])}")
+    for edge in graph["edges"]:
+        evidence = edge["evidence"]
+        lines.append(f"  %% edge {edge['id']}: {evidence['level']} - {escaped(evidence['note'])}")
+    return "\n".join(lines) + "\n"
+
+
+def main() -> int:
+    if len(sys.argv) != 2:
+        print("用法：render_graph <graph.yaml>", file=sys.stderr)
+        return 2
+
+    source = Path(sys.argv[1]).resolve()
+    checker = Path(__file__).with_name("check_graph")
+    checked = subprocess.run([str(checker), "--skip-view-check", str(source)], check=False)
+    if checked.returncode != 0:
+        return checked.returncode
+
+    graph = yaml.safe_load(source.read_text(encoding="utf-8"))
+    output = (source.parent / graph["view"]).resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    content = render(source, graph)
+
+    fd, temporary = tempfile.mkstemp(prefix=f".{output.name}.", dir=output.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(content)
+        os.replace(temporary, output)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+    print(output)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

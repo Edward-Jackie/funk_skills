@@ -1,4 +1,0 @@
-interface:
-  display_name: "跨 AI 业务地图"
-  short_description: "生成跨 AI 共用的核心业务链、状态、风险与补偿地图"
-  default_prompt: "使用 $mapcode 构建本项目跨 AI 共用的核心业务链地图。"

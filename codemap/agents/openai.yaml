@@ -1,0 +1,4 @@
+interface:
+  display_name: "Code Map"
+  short_description: "生成结构化代码导航，并为高风险业务补充规则与验证地图"
+  default_prompt: "使用 $codemap 为当前项目建立按需加载的代码与业务导航地图。"

@@ -1,0 +1,492 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["PyYAML>=6.0.2,<7"]
+# ///
+"""Validate Codemap Graph YAML and optionally export refs/views for check_map.sh."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import re
+import subprocess
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+
+ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+KINDS = {"control", "data", "business", "state", "dependency"}
+LEVELS = {"summary": 12, "detail": 18}
+STATUSES = {"current", "needs-review", "stale", "conflict"}
+NODE_KINDS = {"entry", "process", "decision", "state", "store", "external", "terminal"}
+EVIDENCE_LEVELS = {
+    "human-confirmed",
+    "source-verified",
+    "test-verified",
+    "runtime-verified",
+    "unverified",
+    "conflict",
+}
+
+
+def git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(root), *args],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+
+
+def find_root(path: Path) -> Path:
+    probe = path if path.is_dir() else path.parent
+    result = git(probe, "rev-parse", "--show-toplevel")
+    return Path(result.stdout.strip()).resolve() if result.returncode == 0 else Path.cwd().resolve()
+
+
+def inside(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def strongly_connected(nodes: set[str], edges: list[tuple[str, str]]) -> list[frozenset[str]]:
+    adjacency = {node: [] for node in nodes}
+    for source, target in edges:
+        if source in adjacency and target in adjacency:
+            adjacency[source].append(target)
+
+    index = 0
+    stack: list[str] = []
+    on_stack: set[str] = set()
+    indexes: dict[str, int] = {}
+    lows: dict[str, int] = {}
+    result: list[frozenset[str]] = []
+
+    def visit(node: str) -> None:
+        nonlocal index
+        indexes[node] = index
+        lows[node] = index
+        index += 1
+        stack.append(node)
+        on_stack.add(node)
+
+        for target in adjacency[node]:
+            if target not in indexes:
+                visit(target)
+                lows[node] = min(lows[node], lows[target])
+            elif target in on_stack:
+                lows[node] = min(lows[node], indexes[target])
+
+        if lows[node] == indexes[node]:
+            component: set[str] = set()
+            while True:
+                member = stack.pop()
+                on_stack.remove(member)
+                component.add(member)
+                if member == node:
+                    break
+            self_loop = len(component) == 1 and any(a == node and b == node for a, b in edges)
+            if len(component) > 1 or self_loop:
+                result.append(frozenset(component))
+
+    for node in nodes:
+        if node not in indexes:
+            visit(node)
+    return result
+
+
+class Validator:
+    def __init__(self, root: Path, strict: bool, skip_view_check: bool) -> None:
+        self.root = root
+        self.map_dir = root / ".map"
+        self.graph_dir = self.map_dir / "graphs"
+        self.view_dir = self.map_dir / "views"
+        self.strict = strict
+        self.skip_view_check = skip_view_check
+        self.errors: list[str] = []
+        self.warnings: list[str] = []
+        self.data: dict[Path, dict[str, Any]] = {}
+        self.graph_ids: dict[str, Path] = {}
+        self.refs: set[tuple[str, str, str, str]] = set()
+        self.views: set[tuple[str, str]] = set()
+        self.sub_links: list[tuple[Path, str, Path]] = []
+
+    def error(self, file: Path, message: str) -> None:
+        self.errors.append(f"{self.rel(file)}: {message}")
+
+    def warn(self, file: Path, message: str) -> None:
+        self.warnings.append(f"{self.rel(file)}: {message}")
+
+    def rel(self, path: Path) -> str:
+        try:
+            return str(path.relative_to(self.root))
+        except ValueError:
+            return str(path)
+
+    def load(self, file: Path) -> dict[str, Any] | None:
+        try:
+            value = yaml.safe_load(file.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, yaml.YAMLError) as exc:
+            self.error(file, f"YAML 无法读取：{exc}")
+            return None
+        if not isinstance(value, dict):
+            self.error(file, "根节点必须是 mapping")
+            return None
+        return value
+
+    def validate_evidence(self, file: Path, owner: str, value: Any, refs: list[Any]) -> None:
+        if not isinstance(value, dict):
+            self.error(file, f"{owner} 缺少 evidence mapping")
+            return
+        level = value.get("level")
+        note = value.get("note")
+        if level not in EVIDENCE_LEVELS:
+            self.error(file, f"{owner} evidence.level 非法：{level!r}")
+        if not isinstance(note, str) or not note.strip():
+            self.error(file, f"{owner} evidence.note 不能为空")
+        if level == "source-verified" and not refs:
+            self.error(file, f"{owner} 标为 source-verified 但 refs 为空")
+
+    def validate_refs(self, file: Path, owner: str, refs: Any, commit: str) -> list[Any]:
+        if not isinstance(refs, list):
+            self.error(file, f"{owner} refs 必须是列表")
+            return []
+        for index, ref in enumerate(refs):
+            label = f"{owner}.refs[{index}]"
+            if not isinstance(ref, dict):
+                self.error(file, f"{label} 必须是 mapping")
+                continue
+            path_value = ref.get("path")
+            symbol_value = ref.get("symbol")
+            if not isinstance(path_value, str) or not path_value.strip():
+                self.error(file, f"{label}.path 不能为空")
+                continue
+            ref_path = Path(path_value)
+            if ref_path.is_absolute() or ".." in ref_path.parts:
+                self.error(file, f"{label}.path 必须是仓库内相对路径：{path_value}")
+                continue
+            absolute = (self.root / ref_path).resolve()
+            if not inside(absolute, self.root) or not absolute.is_file():
+                self.error(file, f"{label}.path 不存在：{path_value}")
+                continue
+            if symbol_value is not None and not isinstance(symbol_value, str):
+                self.error(file, f"{label}.symbol 必须是字符串或 null")
+                continue
+            symbol = symbol_value.strip() if isinstance(symbol_value, str) else "-"
+            if symbol and symbol != "-":
+                try:
+                    content = absolute.read_text(encoding="utf-8", errors="ignore")
+                except OSError:
+                    content = ""
+                if symbol not in content:
+                    self.error(file, f"{label}.symbol 未在文件中出现：{path_value} -> {symbol}")
+            self.refs.add((path_value, symbol or "-", self.rel(file), commit))
+        return refs
+
+    def validate_graph(self, file: Path, graph: dict[str, Any]) -> None:
+        if not inside(file, self.graph_dir):
+            self.error(file, "Graph YAML 必须位于项目根目录 .map/graphs")
+        if file.suffix not in {".yaml", ".yml"} or not ID_RE.fullmatch(file.stem):
+            self.error(file, "Graph 文件名必须使用小写英文、数字和连字符")
+
+        if graph.get("schema") != "codemap.graph/v1":
+            self.error(file, "schema 必须为 codemap.graph/v1")
+
+        graph_id = graph.get("id")
+        if not isinstance(graph_id, str) or not ID_RE.fullmatch(graph_id):
+            self.error(file, f"Graph id 非法：{graph_id!r}")
+            graph_id = "<invalid>"
+        elif graph_id in self.graph_ids:
+            self.error(file, f"Graph id 重复，首次出现于 {self.rel(self.graph_ids[graph_id])}：{graph_id}")
+        else:
+            self.graph_ids[graph_id] = file
+
+        if not isinstance(graph.get("title"), str) or not graph["title"].strip():
+            self.error(file, "title 不能为空")
+        if graph.get("kind") not in KINDS:
+            self.error(file, f"kind 非法：{graph.get('kind')!r}")
+
+        level = graph.get("level")
+        if level not in LEVELS:
+            self.error(file, f"level 必须为 summary 或 detail：{level!r}")
+
+        parent = graph.get("parent")
+        if level == "detail":
+            if not isinstance(parent, dict) or not isinstance(parent.get("graph"), str) or not isinstance(parent.get("node"), str):
+                self.error(file, "detail Graph 必须声明 parent.graph 和 parent.node")
+        elif parent is not None:
+            self.error(file, "summary Graph 的 parent 必须为 null")
+
+        status = graph.get("status")
+        if status not in STATUSES:
+            self.error(file, f"status 非法：{status!r}")
+        elif status != "current":
+            self.warn(file, f"status 为 {status}，只能作为线索")
+
+        verified_at = str(graph.get("verified_at", ""))
+        if not DATE_RE.fullmatch(verified_at):
+            self.error(file, "verified_at 必须为 YYYY-MM-DD")
+
+        commit = str(graph.get("verified_commit", ""))
+        if not commit or git(self.root, "cat-file", "-e", f"{commit}^{{commit}}").returncode != 0:
+            self.error(file, f"verified_commit 不存在：{commit or '<空>'}")
+            commit = ""
+
+        tracked = git(self.root, "ls-files", "--error-unmatch", self.rel(file)).returncode == 0
+        if not tracked:
+            self.warn(file, "Graph 尚未纳入 Git")
+
+        view_value = graph.get("view")
+        if not isinstance(view_value, str) or not view_value.strip():
+            self.error(file, "view 必须是相对当前 Graph 的 .mmd 路径")
+        else:
+            view = (file.parent / view_value).resolve()
+            if not inside(view, self.view_dir) or view.suffix != ".mmd":
+                self.error(file, f"view 必须位于 .map/views 且扩展名为 .mmd：{view_value}")
+            else:
+                self.views.add((self.rel(file), str(view.relative_to(self.map_dir))))
+                if not self.skip_view_check:
+                    if not view.is_file():
+                        self.error(file, f"生成视图不存在：{self.rel(view)}")
+                    else:
+                        digest = hashlib.sha256(file.read_bytes()).hexdigest()
+                        marker = f"%% source-sha256: {digest}"
+                        first_lines = "\n".join(view.read_text(encoding="utf-8", errors="ignore").splitlines()[:3])
+                        if marker not in first_lines:
+                            self.error(file, f"生成视图已过期，请运行 render_graph：{self.rel(view)}")
+                        if git(self.root, "ls-files", "--error-unmatch", self.rel(view)).returncode != 0:
+                            self.warn(file, f"生成视图尚未纳入 Git：{self.rel(view)}")
+
+        nodes = graph.get("nodes")
+        edges = graph.get("edges")
+        cycles = graph.get("cycles")
+        if not isinstance(nodes, list) or not nodes:
+            self.error(file, "nodes 必须是非空列表")
+            nodes = []
+        if not isinstance(edges, list):
+            self.error(file, "edges 必须是列表")
+            edges = []
+        if not isinstance(cycles, list):
+            self.error(file, "cycles 必须是列表")
+            cycles = []
+
+        if level in LEVELS and len(nodes) > LEVELS[level]:
+            self.error(file, f"{level} Graph 有 {len(nodes)} 个节点，超过上限 {LEVELS[level]}")
+
+        all_ids: set[str] = set()
+        node_ids: set[str] = set()
+        node_kinds: dict[str, str] = {}
+        degree: dict[str, int] = {}
+        outgoing_conditions: dict[str, set[str]] = {}
+
+        for index, node in enumerate(nodes):
+            owner = f"nodes[{index}]"
+            if not isinstance(node, dict):
+                self.error(file, f"{owner} 必须是 mapping")
+                continue
+            node_id = node.get("id")
+            if not isinstance(node_id, str) or not ID_RE.fullmatch(node_id):
+                self.error(file, f"{owner}.id 非法：{node_id!r}")
+                continue
+            if node_id in all_ids:
+                self.error(file, f"ID 重复：{node_id}")
+            all_ids.add(node_id)
+            node_ids.add(node_id)
+            degree[node_id] = 0
+            node_kinds[node_id] = str(node.get("kind"))
+            if not isinstance(node.get("label"), str) or not node["label"].strip():
+                self.error(file, f"node {node_id} 的 label 不能为空")
+            if node.get("kind") not in NODE_KINDS:
+                self.error(file, f"node {node_id} 的 kind 非法：{node.get('kind')!r}")
+            if not isinstance(node.get("level"), int) or node["level"] < 0:
+                self.error(file, f"node {node_id} 的 level 必须是非负整数")
+            if "detail" not in node or (node["detail"] is not None and not isinstance(node["detail"], str)):
+                self.error(file, f"node {node_id} 的 detail 必须是字符串或 null")
+            sub = node.get("sub")
+            if "sub" not in node or (sub is not None and not isinstance(sub, str)):
+                self.error(file, f"node {node_id} 的 sub 必须是相对路径或 null")
+            elif isinstance(sub, str):
+                sub_file = (file.parent / sub).resolve()
+                if not inside(sub_file, self.graph_dir) or sub_file.suffix not in {".yaml", ".yml"}:
+                    self.error(file, f"node {node_id} 的 sub 必须位于 .map/graphs：{sub}")
+                elif not sub_file.is_file():
+                    self.error(file, f"node {node_id} 的 sub 文件不存在：{sub}")
+                else:
+                    self.sub_links.append((file, node_id, sub_file))
+            refs = self.validate_refs(file, f"node {node_id}", node.get("refs"), commit)
+            self.validate_evidence(file, f"node {node_id}", node.get("evidence"), refs)
+
+        edge_pairs: list[tuple[str, str]] = []
+        for index, edge in enumerate(edges):
+            owner = f"edges[{index}]"
+            if not isinstance(edge, dict):
+                self.error(file, f"{owner} 必须是 mapping")
+                continue
+            edge_id = edge.get("id")
+            if not isinstance(edge_id, str) or not ID_RE.fullmatch(edge_id):
+                self.error(file, f"{owner}.id 非法：{edge_id!r}")
+                continue
+            if edge_id in all_ids:
+                self.error(file, f"ID 重复：{edge_id}")
+            all_ids.add(edge_id)
+            source = edge.get("from")
+            target = edge.get("to")
+            if source not in node_ids:
+                self.error(file, f"edge {edge_id} 的 from 悬空：{source!r}")
+            if target not in node_ids:
+                self.error(file, f"edge {edge_id} 的 to 悬空：{target!r}")
+            if source in node_ids and target in node_ids:
+                edge_pairs.append((source, target))
+                degree[source] += 1
+                degree[target] += 1
+            condition = edge.get("condition")
+            if not isinstance(condition, str) or not condition.strip():
+                self.error(file, f"edge {edge_id} 缺少 condition；无条件边写 always")
+            elif source in node_ids:
+                normalized = condition.strip()
+                seen = outgoing_conditions.setdefault(source, set())
+                if node_kinds.get(source) == "decision" and normalized in seen:
+                    self.error(file, f"decision node {source} 存在重复出边条件：{normalized}")
+                seen.add(normalized)
+            if "detail" not in edge or (edge["detail"] is not None and not isinstance(edge["detail"], str)):
+                self.error(file, f"edge {edge_id} 的 detail 必须是字符串或 null")
+            refs = self.validate_refs(file, f"edge {edge_id}", edge.get("refs"), commit)
+            self.validate_evidence(file, f"edge {edge_id}", edge.get("evidence"), refs)
+
+        if len(node_ids) > 1:
+            for node_id, count in degree.items():
+                if count == 0:
+                    self.error(file, f"孤立节点：{node_id}")
+
+        declared: set[frozenset[str]] = set()
+        cycle_ids: set[str] = set()
+        for index, cycle in enumerate(cycles):
+            owner = f"cycles[{index}]"
+            if not isinstance(cycle, dict):
+                self.error(file, f"{owner} 必须是 mapping")
+                continue
+            cycle_id = cycle.get("id")
+            members = cycle.get("nodes")
+            reason = cycle.get("reason")
+            if not isinstance(cycle_id, str) or not ID_RE.fullmatch(cycle_id):
+                self.error(file, f"{owner}.id 非法：{cycle_id!r}")
+            elif cycle_id in cycle_ids:
+                self.error(file, f"cycle id 重复：{cycle_id}")
+            cycle_ids.add(str(cycle_id))
+            if not isinstance(members, list) or not members or any(member not in node_ids for member in members):
+                self.error(file, f"{owner}.nodes 包含未知节点或为空")
+            else:
+                declared.add(frozenset(str(member) for member in members))
+            if not isinstance(reason, str) or not reason.strip():
+                self.error(file, f"{owner}.reason 不能为空")
+
+        actual = set(strongly_connected(node_ids, edge_pairs))
+        for component in sorted(actual - declared, key=lambda item: sorted(item)):
+            self.error(file, f"存在未声明环：{', '.join(sorted(component))}")
+        for component in sorted(declared - actual, key=lambda item: sorted(item)):
+            self.error(file, f"声明的环已不存在：{', '.join(sorted(component))}")
+
+        evidence_conflicts = sum(
+            1
+            for item in [*nodes, *edges]
+            if isinstance(item, dict)
+            and isinstance(item.get("evidence"), dict)
+            and item["evidence"].get("level") == "conflict"
+        )
+        if evidence_conflicts and status != "conflict":
+            self.error(file, "存在 conflict 证据，但 Graph status 不是 conflict")
+        if status == "conflict" and not evidence_conflicts:
+            self.error(file, "Graph status 为 conflict，但没有 conflict 证据")
+
+    def validate_sub_links(self) -> None:
+        for parent_file, parent_node, child_file in self.sub_links:
+            child = self.data.get(child_file)
+            parent = self.data.get(parent_file)
+            if child is None or parent is None:
+                continue
+            expected = {"graph": parent.get("id"), "node": parent_node}
+            if child.get("level") != "detail":
+                self.error(child_file, "被 sub 引用的 Graph 必须为 detail")
+            if child.get("parent") != expected:
+                self.error(child_file, f"parent 必须为 {expected}")
+
+
+def collect_files(path: Path, validator: Validator) -> list[Path]:
+    initial = sorted(path.rglob("*.yaml")) + sorted(path.rglob("*.yml")) if path.is_dir() else [path]
+    queue = [item.resolve() for item in initial]
+    seen: set[Path] = set()
+    while queue:
+        file = queue.pop(0)
+        if file in seen:
+            continue
+        seen.add(file)
+        if not file.is_file():
+            validator.error(file, "Graph 文件不存在")
+            continue
+        graph = validator.load(file)
+        if graph is None:
+            continue
+        validator.data[file] = graph
+        nodes = graph.get("nodes")
+        if isinstance(nodes, list):
+            for node in nodes:
+                if isinstance(node, dict) and isinstance(node.get("sub"), str):
+                    child = (file.parent / node["sub"]).resolve()
+                    if child not in seen:
+                        queue.append(child)
+    return sorted(validator.data)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("path", type=Path, help="Graph YAML file or directory")
+    parser.add_argument("--root", type=Path, help="project root; defaults to Git root")
+    parser.add_argument("--strict", action="store_true", help="treat warnings as failure")
+    parser.add_argument("--refs-out", type=Path, help="write path/symbol/source/commit TSV")
+    parser.add_argument("--views-out", type=Path, help="write graph/view TSV")
+    parser.add_argument("--skip-view-check", action="store_true", help=argparse.SUPPRESS)
+    args = parser.parse_args()
+
+    target = args.path.resolve()
+    root = args.root.resolve() if args.root else find_root(target)
+    validator = Validator(root, args.strict, args.skip_view_check)
+
+    files = collect_files(target, validator)
+    if not files:
+        validator.errors.append(f"{target}: 未找到 Graph YAML")
+    for file in files:
+        validator.validate_graph(file, validator.data[file])
+    validator.validate_sub_links()
+
+    if args.refs_out:
+        args.refs_out.parent.mkdir(parents=True, exist_ok=True)
+        args.refs_out.write_text(
+            "".join("\t".join(row) + "\n" for row in sorted(validator.refs)),
+            encoding="utf-8",
+        )
+    if args.views_out:
+        args.views_out.parent.mkdir(parents=True, exist_ok=True)
+        args.views_out.write_text(
+            "".join("\t".join(row) + "\n" for row in sorted(validator.views)),
+            encoding="utf-8",
+        )
+
+    for message in validator.errors:
+        print(f"[错误] {message}")
+    for message in validator.warnings:
+        print(f"[注意] {message}")
+    print(f"Graph 校验：{len(validator.errors)} 个错误，{len(validator.warnings)} 个注意，{len(files)} 个文件。")
+
+    return 1 if validator.errors or (args.strict and validator.warnings) else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

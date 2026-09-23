@@ -1,14 +1,12 @@
 #!/usr/bin/env bash
-# count_sources.sh — count non-generated source files to drive the Step 2 layering decision.
+# Count non-generated source files as one layering signal, not the decision itself.
 #
 # Usage:
 #   scripts/count_sources.sh [ROOT]                          # ROOT defaults to "."
 #   CODEMAP_EXCLUDE='regex' scripts/count_sources.sh [ROOT]  # add project-specific excludes
 #
-# Prints the non-generated source-file count, a per-extension breakdown, and a
-# layering hint (<=50 -> single-layer, >50 -> two-layer). The exclude lists below
-# are best-effort defaults across common stacks, not exhaustive — override per project
-# with CODEMAP_EXCLUDE when a generated path slips through.
+# Prints a count, per-extension breakdown, and a size hint. Business-chain count,
+# cross-domain coupling, and the 120-line L1 budget can still require L2 packages.
 
 set -uo pipefail
 
@@ -41,7 +39,7 @@ echo "By extension:"
 printf '%s\n' "$files" | grep -oE "$EXT" | sort | uniq -c | sort -rn
 echo
 if [ "$count" -le 50 ]; then
-  echo "Layering hint: <=50 -> single-layer mode (one .claude/CODEMAP.md)"
+  echo "Layering hint: <=50 files may fit one .map/CODEMAP.md if business complexity and the 120-line budget also fit."
 else
-  echo "Layering hint: >50 -> two-layer mode (top-level + per-module CODEMAP-<module>.md)"
+  echo "Layering hint: >50 files usually needs .map/CODEMAP-<domain>.md packages."
 fi
