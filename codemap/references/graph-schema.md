@@ -159,3 +159,12 @@ cycles:
 ```
 
 未声明环和已经不存在的多余声明都会失败，避免把意外循环画成正常流程。
+
+## ViewSpec 投影边界
+
+Graph 不保存渲染坐标、路由、主题、缩放或导出配置。需要固定一个人的阅读镜头时，使用 `.map/views/<name>.view.yaml` 的 `codemap.view/v1`：
+
+- 只能引用 Graph/Overlay ID、语义类型、当前布局、焦点、边类型过滤和质量上限。
+- 不得复制节点、边、条件、证据、refs 或 Markdown 正文。
+- `architecture`、`workflow`、`sequence`、`dataflow`、`lifecycle` 是语义投影；当前 Web 仅实现 `relation`/`swimlane`，其余交给后续类型化渲染器。
+- 视图生成失败只能阻断派生产物，不能回写或修改 Graph 事实。

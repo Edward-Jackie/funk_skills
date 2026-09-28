@@ -14,6 +14,19 @@ Codemap 的 Markdown 和 Graph 保存事实，Web Explorer 只负责展示。任
 
 同一 Graph 可以生成多个视图。视图切换只改变布局和可见范围，不改变节点、边、证据或 refs。
 
+## ViewSpec 与类型化投影
+
+需要复用某个阅读镜头时，使用 `.map/views/<name>.view.yaml` 保存 ViewSpec，不要复制一份节点和边。ViewSpec 只声明 Graph、Overlay、语义类型、当前布局、焦点和边过滤；完整字段与限制见 [类型化视图编译契约](view-compiler.md)。
+
+```bash
+scripts/render_web .map/graphs \
+  --view .map/views/billing-workflow.view.yaml \
+  --overlay .map/overlays/api-key-daily-quota.yaml \
+  --open
+```
+
+当前 Explorer 的实际布局只有 `relation` 和 `swimlane`。`architecture`、`workflow`、`sequence`、`dataflow`、`lifecycle` 是语义投影名，后续可以由 Archify 适配器生成类型化 IR；未接入适配器前，不得把语义名当成已完成的渲染器。
+
 ## 总分总钻取
 
 左侧菜单必须从 Graph 元数据自动生成，不维护单独配置：
@@ -152,3 +165,5 @@ scripts/render_web .map/graphs \
 - 泳道默认宽度约 240px，纵向层级间距约 130px，同层节点错位约 100px。
 - 默认使用约 `0.92` 的舒适缩放并保留拖拽空间，不自动把整图压进一屏。
 - “适配画布”是显式操作；扩大间距后不能再用自动全图缩放抵消留白。
+
+ViewSpec 生成的 HTML 必须保留 Graph 的稳定节点/边 ID，并在浏览器检查前区分“结构生成成功”和“视觉验收成功”。

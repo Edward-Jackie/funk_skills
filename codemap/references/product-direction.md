@@ -44,6 +44,18 @@ Graph v2：节点、边、泳道、条件、证据、上下文指针
 Overlay：未实施需求 ──叠加──→ Web / query_graph
 ```
 
+### 视图编译层
+
+Graph 与 Overlay 通过可选 ViewSpec 进入类型化视图编译层，再交给当前 Explorer 或未来的 Archify 适配器：
+
+```text
+Graph / Overlay → ViewSpec → 临时 IR → HTML / SVG / 浏览器回执
+```
+
+- ViewSpec 只保存图 ID、语义类型、布局模式、焦点、过滤和质量上限，不复制事实。
+- 临时 IR 可以包含渲染器需要的坐标、路由和行范围，但不得提交为 Graph 真源。
+- Archify 是可替换渲染器，不是 Codemap 的业务规则层；MCP 只包装同一套 Core，不保存第三份状态。
+
 - 源码、测试、运行结果和人工确认规则是事实证据。
 - Markdown 是 AI 认知主入口，不为画图牺牲表达。
 - Graph 是结构化关系层，不复制 Markdown 长文。
@@ -68,3 +80,4 @@ Overlay：未实施需求 ──叠加──→ Web / query_graph
 - 一致性：修改事实只改 Markdown/Graph；所有视图重新生成，无第二套手写真相。
 - 可维护性：新增需求只写 Overlay 或更新事实，不改渲染器、不手排坐标。
 - 开发闭环：需求能正向定位代码，Git Diff 也能反向命中业务图、下游检查范围和未覆盖文件。
+- 视图闭环：固定 ViewSpec 可以重建同一阅读镜头，且渲染器替换不改变节点、边、证据和业务条件。

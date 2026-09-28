@@ -14,6 +14,8 @@ CODEMAP 是带证据的导航缓存，不替代源码、测试、运行环境或
 
 首次建设或改版前先读取 [改造方向与分层契约](references/product-direction.md)，先确定每层职责，再生成地图文件。
 
+视图改造还要读取 [类型化视图编译契约](references/view-compiler.md)：ViewSpec 只描述阅读请求，Archify 或其他渲染器只接收派生 IR，不得把坐标、排版和渲染字段写回 Graph。
+
 ## 使用边界
 
 - 已有地图时，只在缺少上下文、跨域分析或高风险改动时读取 L1，再按路由加载最小 L2；不要把全量地图作为每次任务的前置仪式。
@@ -52,6 +54,7 @@ CODEMAP 是带证据的导航缓存，不替代源码、测试、运行环境或
 .map/CODEMAP-<domain>.md        # L2：领域导航；高风险领域可追加业务链
 .map/graphs/<flow>.yaml         # v2 结构化关系层，供检索和派生视图使用
 .map/views/<flow>.mmd           # 由 Graph 单向生成的 Mermaid 视图
+.map/views/<flow>.view.yaml     # 可选的 ViewSpec，只声明语义视角和阅读镜头
 .map/overlays/<task>.yaml       # 单需求影响覆盖层，默认不并入基础 Graph
 .map/site/index.html            # 由 Graph 单向生成的本地交互视图
 .map/context/<task>.md          # 按需求生成的临时 AI 上下文包
@@ -87,12 +90,12 @@ CODEMAP 是带证据的导航缓存，不替代源码、测试、运行环境或
 5. **按模式组织内容**：默认使用导航模板；只有命中高风险条件的领域才加载并追加业务模板。
 6. **逐条取证**：锚点使用 `路径 -> 符号/SQL/配置键`，不保存行号。显式调用才进入控制流；隐式钩子、反射、自动注册找不到证据时标 `unverified` 并给出验证路径。
 7. **生成结构化 Graph**：按 [Graph Schema](references/graph-schema.md) 从源码和人工规则重新生成至少一张 summary Graph；不得把旧 Graph 当模板逐字段升级。YAML 是节点、边、泳道、条件和证据的唯一结构化关系源，不手写 Mermaid，也不保存渲染坐标。
-8. **生成静态与交互视图**：运行 `scripts/render_graph <graph.yaml>` 生成 Mermaid；运行 `scripts/render_web .map/graphs --open` 生成并打开本地 Explorer。Web 同时提供关系图和适用时的业务泳道，CODEMAP Markdown 不复制视图源码。
+8. **生成静态与交互视图**：运行 `scripts/render_graph <graph.yaml>` 生成 Mermaid；运行 `scripts/render_web .map/graphs --open` 生成并打开本地 Explorer。需要固定阅读镜头时，先写不含节点/边的 ViewSpec，再运行 `scripts/render_web .map/graphs --view .map/views/<name>.view.yaml --open`。Web 同时提供关系图和适用时的业务泳道，CODEMAP Markdown 不复制视图源码。
 9. **按需求生成影响视图**：需求尚未实现时，按 [交互视图与需求覆盖层](references/interactive-explorer.md) 创建 `.map/overlays/<task>.yaml`，再用 `render_web --overlay` 展示新增、修改、风险和删除候选。Overlay 不得伪装成当前实现。
 10. **为 AI 抽取最小上下文**：运行 `scripts/query_graph .map/graphs --query '<需求>' --depth 2`。优先加载命中节点的 Markdown 章节、规则、风险和源码锚点；`stale/needs-review/conflict/unverified` 只作线索并回到源码核对。
 11. **开发后反查影响**：代码发生变化后运行 `scripts/impact_diff .map/graphs`；需要与分支基线比较时传入 `--base <rev>`。按 [代码改动影响分析](references/change-impact.md) 核对直接命中、下游影响和未覆盖文件，再决定是否更新基础 Graph 或需求 Overlay。
 12. **增量写入与接入**：保留所有 `<!-- manual: keep -->` 块，只改变化的事实。Git 已提供恢复能力，不创建 `.bak`，不维护重复 changelog。仅向已存在且适用的 AI 入口追加按需读取规则。
-13. **确定性校验**：同时校验导航文档和 Graph：
+13. **确定性校验**：同时校验导航文档、Graph 和使用中的 ViewSpec：
 
    ```bash
    scripts/check_graph .map/graphs
@@ -100,7 +103,7 @@ CODEMAP 是带证据的导航缓存，不替代源码、测试、运行环境或
    scripts/check_map.sh --strict .map/CODEMAP.md
    ```
 
-   `check_map.sh` 会调用 Graph 校验器、收集 YAML refs 并纳入条目级过期检测。普通模式报告结构、链接、锚点、新鲜度和冲突；严格模式将失效锚点、过期、冲突、非 `current`、未纳入 Git 和超限判为失败。
+   `render_web --view` 会在写 HTML 前校验 ViewSpec 引用的 Graph、Overlay、焦点节点、边类型和质量上限。`check_map.sh` 会调用 Graph 校验器、收集 YAML refs 并纳入条目级过期检测。普通模式报告结构、链接、锚点、新鲜度和冲突；严格模式将失效锚点、过期、冲突、非 `current`、未纳入 Git 和超限判为失败。
 
 ## 写作约束
 
@@ -109,6 +112,9 @@ CODEMAP 是带证据的导航缓存，不替代源码、测试、运行环境或
 - Summary Graph 最多 12 个节点，detail Graph 最多 18 个节点；超过就用节点 `sub` 拆出 detail 图。
 - Obsidian 式力导向图只用于发现关联；严格执行顺序使用泳道或分层图，生命周期使用状态图，单需求使用影响覆盖层。不要用一种布局承载所有语义。
 - AI 生成的是 Graph/Overlay/View Query，不生成任意 HTML、CSS 或坐标；布局和交互由 `render_web` 统一实现。
+- ViewSpec 只允许引用 Graph/Overlay ID、语义类型、布局模式、焦点、边类型过滤和质量上限；禁止复制节点、边、规则、refs 或坐标。
+- 语义视图按 `architecture / workflow / sequence / dataflow / lifecycle` 选择；当前 Explorer 先落地 `relation / swimlane`，其他类型只能标为目标投影，不得伪装成已经支持的渲染器。
+- Archify 适配器属于可替换的派生渲染层；它可以消费临时 IR，但不能成为 Codemap 的事实存储或 MCP 的第二份状态。
 - Explorer 左侧导航由 `domain / kind / level / parent / sub` 自动生成“领域 → 视角 → 总图/分图”，不得手工维护第二套菜单结构。
 - 节点数量不受单屏限制；summary/detail 上限约束的是业务粒度，不是画布容量。关系图和泳道图分别使用自适应间距，默认舒适视图，完整缩放由用户主动触发。
 - 误导入口只记录确认走过的弯路；未知内容写盲区，不用猜测补齐。
@@ -122,6 +128,8 @@ CODEMAP 是带证据的导航缓存，不替代源码、测试、运行环境或
 - 本地 Explorer 能在全局关系、领域关系和业务泳道之间切换；点击节点可看到关联边、证据与源码锚点，点击或悬停边可在侧栏查看条件与说明。
 - 一个真实需求能生成不污染基础 Graph 的 Overlay，并在“改前 / 只看改动 / 改后带上下文”之间切换；`query_graph` 能输出可审计的最小上下文包。
 - 一组真实 Git 改动能由 `impact_diff` 反查直接命中、有限深度的下游影响和未覆盖文件；结果不夸大为完整影响证明。
+- 固定的业务视角能由 ViewSpec 重建，且渲染器变化不会改变节点/边 ID、证据和业务条件。
+- 结构检查、浏览器检查和人眼视觉复核分别报告，未完成浏览器或人工检查时不得声称视觉质量已验收。
 - 关键结论有事实类型、证据等级和具体来源；未运行的内容没有标成 `runtime-verified`。
 - 规则与实现差异进入冲突台账，没有被静默改写。
 - 校验通过；不能通过的项目被明确交付为风险，而不是伪造 `current`。

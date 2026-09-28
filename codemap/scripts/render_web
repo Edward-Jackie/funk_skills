@@ -22,6 +22,9 @@ import yaml
 GRAPH_SCHEMA = "codemap.graph/v2"
 OVERLAY_SCHEMA = "codemap.overlay/v1"
 OVERLAY_ACTIONS = {"add", "modify", "risk", "remove"}
+VIEW_SCHEMA = "codemap.view/v1"
+VIEW_MODES = {"relation", "swimlane"}
+VIEW_SEMANTICS = {"architecture", "workflow", "sequence", "dataflow", "lifecycle"}
 PLACEHOLDER = "__CODEMAP_DATA__"
 
 
@@ -157,6 +160,73 @@ def load_overlays(paths: list[Path], graphs: list[dict[str, Any]]) -> list[dict[
     return overlays
 
 
+def load_view_spec(path: Path, graphs: list[dict[str, Any]], overlays: list[dict[str, Any]]) -> dict[str, Any]:
+    view = load_yaml(path)
+    if view.get("schema") != VIEW_SCHEMA:
+        raise ValueError(f"{path} schema 必须为 {VIEW_SCHEMA}")
+    view_id = view.get("id")
+    if not isinstance(view_id, str) or not view_id:
+        raise ValueError(f"{path} 缺少 ViewSpec id")
+    if not isinstance(view.get("title"), str) or not view["title"].strip():
+        raise ValueError(f"{path} title 不能为空")
+
+    graph_ids = {graph["id"] for graph in graphs}
+    graph_id = view.get("graph")
+    if graph_id not in graph_ids:
+        raise ValueError(f"{path} 引用了未加载的 Graph：{graph_id}")
+    graph = next(graph for graph in graphs if graph["id"] == graph_id)
+    graph_nodes = {node.get("id") for node in graph.get("nodes", []) if isinstance(node, dict)}
+    graph_edges = [edge for edge in graph.get("edges", []) if isinstance(edge, dict)]
+    graph_edge_kinds = {edge.get("kind") for edge in graph_edges}
+
+    render = view.get("render")
+    if not isinstance(render, dict):
+        raise ValueError(f"{path} render 必须是 mapping")
+    if render.get("engine", "codemap-web") != "codemap-web":
+        raise ValueError(f"{path} 当前只支持 render.engine=codemap-web，Archify 适配器尚未接入")
+    if render.get("mode") not in VIEW_MODES:
+        raise ValueError(f"{path} render.mode 必须是 relation 或 swimlane")
+    if render.get("semantic") not in VIEW_SEMANTICS:
+        raise ValueError(f"{path} render.semantic 非法：{render.get('semantic')!r}")
+
+    overlay_id = view.get("overlay")
+    overlay_ids = {overlay.get("id") for overlay in overlays}
+    if overlay_id is not None and overlay_id not in overlay_ids:
+        raise ValueError(f"{path} 引用了未加载的 Overlay：{overlay_id}")
+
+    selection = view.get("selection", {})
+    if not isinstance(selection, dict):
+        raise ValueError(f"{path} selection 必须是 mapping")
+    focus = selection.get("focus")
+    if focus is not None and focus not in graph_nodes:
+        raise ValueError(f"{path} selection.focus 不存在：{focus}")
+    edge_kinds = selection.get("edge_kinds", [])
+    if not isinstance(edge_kinds, list) or any(kind not in graph_edge_kinds for kind in edge_kinds):
+        raise ValueError(f"{path} selection.edge_kinds 必须引用当前 Graph 已有的边类型")
+    depth = selection.get("depth", 0)
+    if not isinstance(depth, int) or depth < 0 or depth > 4:
+        raise ValueError(f"{path} selection.depth 必须是 0 到 4 的整数")
+
+    quality = view.get("quality", {})
+    if not isinstance(quality, dict):
+        raise ValueError(f"{path} quality 必须是 mapping")
+    max_nodes = quality.get("max_nodes")
+    if max_nodes is not None and (not isinstance(max_nodes, int) or max_nodes < 1 or len(graph_nodes) > max_nodes):
+        raise ValueError(f"{path} quality.max_nodes 不足以容纳当前 Graph")
+    max_edges = quality.get("max_edges")
+    if max_edges is not None and (not isinstance(max_edges, int) or max_edges < 0 or len(graph_edges) > max_edges):
+        raise ValueError(f"{path} quality.max_edges 不足以容纳当前 Graph")
+    if quality.get("require_evidence", False):
+        for collection, items in (("nodes", graph.get("nodes", [])), ("edges", graph_edges)):
+            for item in items:
+                evidence = item.get("evidence") if isinstance(item, dict) else None
+                if not isinstance(evidence, dict) or not evidence.get("level") or not evidence.get("note"):
+                    raise ValueError(f"{path} quality.require_evidence=true 但 {collection} 缺少完整 evidence")
+
+    view["_source"] = str(path)
+    return view
+
+
 def open_file(path: Path) -> None:
     system = platform.system()
     if system == "Darwin":
@@ -183,6 +253,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("path", type=Path, help="Graph v2 YAML 文件或 graphs 目录")
     parser.add_argument("--overlay", action="append", type=Path, default=[], help="可重复传入需求 Overlay")
+    parser.add_argument("--view", type=Path, help="ViewSpec YAML；只声明阅读镜头，不复制 Graph 事实")
     parser.add_argument("--out", type=Path, help="输出 HTML；默认写入同级 site/index.html")
     parser.add_argument("--root", type=Path, help="项目根目录；默认自动识别 Git 根")
     parser.add_argument("--open", action="store_true", help="生成后用本机默认浏览器打开")
@@ -202,6 +273,7 @@ def main() -> int:
     try:
         graphs = load_graphs(target)
         overlays = load_overlays([path.resolve() for path in args.overlay], graphs)
+        view_spec = load_view_spec(args.view.resolve(), graphs, overlays) if args.view else None
         template = Path(__file__).parent.parent / "assets" / "codemap-explorer.html"
         html = template.read_text(encoding="utf-8")
         if html.count(PLACEHOLDER) != 1:
@@ -216,6 +288,7 @@ def main() -> int:
             "root_href": os.path.relpath(root, output.parent),
             "graphs": graphs,
             "overlays": overlays,
+            "view": view_spec,
         },
         ensure_ascii=False,
         separators=(",", ":"),
