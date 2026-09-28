@@ -1,0 +1,232 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["PyYAML>=6.0.2,<7"]
+# ///
+"""从 Codemap Graph v2 生成单文件离线 Web Explorer。"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import platform
+import subprocess
+import tempfile
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+
+GRAPH_SCHEMA = "codemap.graph/v2"
+OVERLAY_SCHEMA = "codemap.overlay/v1"
+OVERLAY_ACTIONS = {"add", "modify", "risk", "remove"}
+PLACEHOLDER = "__CODEMAP_DATA__"
+
+
+def git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(root), *args],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+
+
+def find_root(path: Path) -> Path:
+    probe = path if path.is_dir() else path.parent
+    result = git(probe, "rev-parse", "--show-toplevel")
+    return Path(result.stdout.strip()).resolve() if result.returncode == 0 else Path.cwd().resolve()
+
+
+def infer_map_root(target: Path, root: Path) -> Path:
+    if target.is_dir() and target.name == "graphs":
+        return target.parent
+    if target.is_file() and target.parent.name == "graphs":
+        return target.parent.parent
+    return root / ".map"
+
+
+def load_yaml(path: Path) -> dict[str, Any]:
+    try:
+        value = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, yaml.YAMLError) as exc:
+        raise ValueError(f"无法读取 {path}：{exc}") from exc
+    if not isinstance(value, dict):
+        raise ValueError(f"{path} 的根节点必须是 mapping")
+    return value
+
+
+def graph_files(path: Path) -> list[Path]:
+    if path.is_file():
+        return [path]
+    return sorted([*path.rglob("*.yaml"), *path.rglob("*.yml")])
+
+
+def load_graphs(path: Path) -> list[dict[str, Any]]:
+    graphs: list[dict[str, Any]] = []
+    ids: set[str] = set()
+    for file in graph_files(path):
+        graph = load_yaml(file)
+        if graph.get("schema") != GRAPH_SCHEMA:
+            raise ValueError(f"{file} 不是 {GRAPH_SCHEMA}，新版 Explorer 禁止混入旧 Graph")
+        graph_id = graph.get("id")
+        if not isinstance(graph_id, str) or not graph_id:
+            raise ValueError(f"{file} 缺少 Graph id")
+        if graph_id in ids:
+            raise ValueError(f"Graph id 重复：{graph_id}")
+        ids.add(graph_id)
+        graph["_source"] = str(file)
+        graph["_file"] = file.name
+        graphs.append(graph)
+    if not graphs:
+        raise ValueError(f"{path} 未找到 {GRAPH_SCHEMA}")
+    return sorted(
+        graphs,
+        key=lambda graph: (graph.get("level") != "summary", graph.get("domain", ""), graph.get("title", ""), graph["id"]),
+    )
+
+
+def load_overlays(paths: list[Path], graphs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    overlays: list[dict[str, Any]] = []
+    graph_ids = {graph["id"] for graph in graphs}
+    node_ids = {
+        graph["id"]: {node.get("id") for node in graph.get("nodes", []) if isinstance(node, dict)}
+        for graph in graphs
+    }
+    edge_ids = {
+        graph["id"]: {edge.get("id") for edge in graph.get("edges", []) if isinstance(edge, dict)}
+        for graph in graphs
+    }
+    for path in paths:
+        overlay = load_yaml(path)
+        if overlay.get("schema") != OVERLAY_SCHEMA:
+            raise ValueError(f"{path} schema 必须为 {OVERLAY_SCHEMA}")
+        if overlay.get("status") != "proposal":
+            raise ValueError(f"{path} status 必须为 proposal")
+        base_graphs = overlay.get("base_graphs")
+        if not isinstance(base_graphs, list) or not base_graphs or any(item not in graph_ids for item in base_graphs):
+            raise ValueError(f"{path} base_graphs 为空或包含未知 Graph")
+        nodes = overlay.get("nodes", [])
+        edges = overlay.get("edges", [])
+        if not isinstance(nodes, list) or not isinstance(edges, list):
+            raise ValueError(f"{path} nodes 与 edges 必须是列表")
+        added_nodes: dict[str, set[str]] = {}
+        for item in nodes:
+            if not isinstance(item, dict) or item.get("action") not in OVERLAY_ACTIONS:
+                raise ValueError(f"{path} nodes 存在非法 action")
+            graph_id = item.get("graph")
+            item_id = item.get("id")
+            if graph_id not in graph_ids or not isinstance(item_id, str) or not item_id:
+                raise ValueError(f"{path} nodes 引用了未知 Graph 或缺少 id")
+            if not isinstance(item.get("reason") or item.get("detail"), str):
+                raise ValueError(f"{path} node {item_id} 缺少 reason 或 detail")
+            if item.get("action") == "add":
+                if item_id in node_ids[graph_id] or item_id in added_nodes.setdefault(graph_id, set()):
+                    raise ValueError(f"{path} 新增 node id 已存在：{graph_id}:{item_id}")
+                added_nodes[graph_id].add(item_id)
+                evidence = item.get("evidence")
+                if not isinstance(evidence, dict) or evidence.get("level") != "unverified":
+                    raise ValueError(f"{path} 新增 node 必须标记 unverified")
+            elif item_id not in node_ids[graph_id]:
+                raise ValueError(f"{path} node 影响目标不存在：{graph_id}:{item_id}")
+        for item in edges:
+            if not isinstance(item, dict) or item.get("action") not in OVERLAY_ACTIONS:
+                raise ValueError(f"{path} edges 存在非法 action")
+            graph_id = item.get("graph")
+            item_id = item.get("id")
+            if graph_id not in graph_ids or not isinstance(item_id, str) or not item_id:
+                raise ValueError(f"{path} edges 引用了未知 Graph 或缺少 id")
+            if not isinstance(item.get("reason") or item.get("detail"), str):
+                raise ValueError(f"{path} edge {item_id} 缺少 reason 或 detail")
+            if item.get("action") == "add":
+                if item_id in edge_ids[graph_id]:
+                    raise ValueError(f"{path} 新增 edge id 已存在：{graph_id}:{item_id}")
+                valid_nodes = node_ids[graph_id] | added_nodes.get(graph_id, set())
+                if item.get("from") not in valid_nodes or item.get("to") not in valid_nodes:
+                    raise ValueError(f"{path} 新增 edge 存在悬空端点：{graph_id}:{item_id}")
+                evidence = item.get("evidence")
+                if not isinstance(evidence, dict) or evidence.get("level") != "unverified":
+                    raise ValueError(f"{path} 新增 edge 必须标记 unverified")
+            elif item_id not in edge_ids[graph_id]:
+                raise ValueError(f"{path} edge 影响目标不存在：{graph_id}:{item_id}")
+        overlay["_source"] = str(path)
+        overlays.append(overlay)
+    return overlays
+
+
+def open_file(path: Path) -> None:
+    system = platform.system()
+    if system == "Darwin":
+        subprocess.run(["open", str(path)], check=False)
+    elif system == "Windows":
+        getattr(os, "startfile")(path)
+    else:
+        subprocess.run(["xdg-open", str(path)], check=False)
+
+
+def atomic_write(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(content)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("path", type=Path, help="Graph v2 YAML 文件或 graphs 目录")
+    parser.add_argument("--overlay", action="append", type=Path, default=[], help="可重复传入需求 Overlay")
+    parser.add_argument("--out", type=Path, help="输出 HTML；默认写入同级 site/index.html")
+    parser.add_argument("--root", type=Path, help="项目根目录；默认自动识别 Git 根")
+    parser.add_argument("--open", action="store_true", help="生成后用本机默认浏览器打开")
+    args = parser.parse_args()
+
+    target = args.path.resolve()
+    root = args.root.resolve() if args.root else find_root(target)
+    map_root = infer_map_root(target, root).resolve()
+    checker = Path(__file__).with_name("check_graph")
+    checked = subprocess.run(
+        [str(checker), "--root", str(root), "--map-root", str(map_root), "--skip-view-check", str(target)],
+        check=False,
+    )
+    if checked.returncode != 0:
+        return checked.returncode
+
+    try:
+        graphs = load_graphs(target)
+        overlays = load_overlays([path.resolve() for path in args.overlay], graphs)
+        template = Path(__file__).parent.parent / "assets" / "codemap-explorer.html"
+        html = template.read_text(encoding="utf-8")
+        if html.count(PLACEHOLDER) != 1:
+            raise ValueError(f"Explorer 模板必须且只能包含一个 {PLACEHOLDER}")
+    except (OSError, UnicodeError, ValueError) as exc:
+        parser.error(str(exc))
+
+    output = args.out.resolve() if args.out else map_root / "site" / "index.html"
+    payload = json.dumps(
+        {
+            "project": root.name,
+            "root_href": os.path.relpath(root, output.parent),
+            "graphs": graphs,
+            "overlays": overlays,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        default=str,
+    ).replace("</", "<\\/")
+    atomic_write(output, html.replace(PLACEHOLDER, payload))
+    print(output)
+    if args.open:
+        open_file(output)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -3,7 +3,7 @@
 # requires-python = ">=3.10"
 # dependencies = ["PyYAML>=6.0.2,<7"]
 # ///
-"""Render one validated Codemap Graph YAML into its declared Mermaid view."""
+"""把通过校验的 Codemap Graph YAML 渲染为 Mermaid 视图。"""
 
 from __future__ import annotations
 
@@ -43,31 +43,50 @@ def node_line(node: dict[str, Any]) -> str:
 
 def render(source: Path, graph: dict[str, Any]) -> str:
     digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    layout = graph.get("layout") if isinstance(graph.get("layout"), dict) else {}
+    direction = layout.get("direction", "TB")
     lines = [
-        f"%% Generated from {source.name}; do not edit.",
+        f"%% 由 {source.name} 自动生成，请勿手工编辑。",
         f"%% source-sha256: {digest}",
-        "flowchart TD",
+        f"flowchart {direction}",
     ]
 
-    levels: dict[int, list[dict[str, Any]]] = {}
-    for node in graph["nodes"]:
-        levels.setdefault(node["level"], []).append(node)
-    for level in sorted(levels):
-        lines.append(f'  subgraph level_{level}["Level {level}"]')
-        for node in levels[level]:
-            lines.append(node_line(node))
-        lines.append("  end")
+    lanes = layout.get("lanes") if isinstance(layout.get("lanes"), list) else []
+    if lanes:
+        indexed_lanes = sorted(enumerate(lanes), key=lambda item: (item[1]["order"], item[0]))
+        nodes_by_lane: dict[str, list[dict[str, Any]]] = {}
+        for node in graph["nodes"]:
+            nodes_by_lane.setdefault(node["lane"], []).append(node)
+        for _, lane in indexed_lanes:
+            lines.append(f'  subgraph lane_{mermaid_id(lane["id"])}["{escaped(lane["label"])}"]')
+            lines.append("    direction TB")
+            for node in sorted(nodes_by_lane.get(lane["id"], []), key=lambda item: item["level"]):
+                lines.append(node_line(node))
+            lines.append("  end")
+    else:
+        levels: dict[int, list[dict[str, Any]]] = {}
+        for node in graph["nodes"]:
+            levels.setdefault(node["level"], []).append(node)
+        for level in sorted(levels):
+            lines.append(f'  subgraph level_{level}["阶段 {level}"]')
+            for node in levels[level]:
+                lines.append(node_line(node))
+            lines.append("  end")
 
     for edge in graph["edges"]:
         source_id = mermaid_id(edge["from"])
         target_id = mermaid_id(edge["to"])
-        parts = []
+        parts: list[str] = []
         if edge.get("label"):
             parts.append(str(edge["label"]))
-        if edge["condition"] != "always":
+        if edge["condition"] != "always" and edge["condition"] not in parts:
             parts.append(str(edge["condition"]))
         label = " / ".join(parts).replace("|", "/")
-        connector = f' -->|"{escaped(label)}"| ' if label else " --> "
+        dashed = edge.get("kind") in {"async", "schedule", "compensate"}
+        if dashed:
+            connector = f' -.->|"{escaped(label)}"| ' if label else " -.-> "
+        else:
+            connector = f' -->|"{escaped(label)}"| ' if label else " --> "
         lines.append(f"  {source_id}{connector}{target_id}")
 
     sub_nodes = [mermaid_id(node["id"]) for node in graph["nodes"] if node.get("sub")]

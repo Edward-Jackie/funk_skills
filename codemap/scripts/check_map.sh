@@ -1,16 +1,35 @@
 #!/usr/bin/env bash
-# Validate the CODEMAP contract: structure, metadata, links, evidence, anchors,
-# freshness, conflicts, Git tracking, and size.
+# 校验 CODEMAP 的结构、元数据、链接、证据、锚点、新鲜度、冲突、Git 状态和规模。
 
 set -uo pipefail
 
 STRICT=0
-if [ "${1:-}" = "--strict" ]; then
-  STRICT=1
-  shift
-fi
+MAP_ROOT=""
+INDEX_ARG=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --strict)
+      STRICT=1
+      shift
+      ;;
+    --map-root)
+      [ "$#" -ge 2 ] || { echo "--map-root 缺少目录" >&2; exit 2; }
+      MAP_ROOT="$2"
+      shift 2
+      ;;
+    -*)
+      echo "未知参数：$1" >&2
+      exit 2
+      ;;
+    *)
+      [ -z "$INDEX_ARG" ] || { echo "只能指定一个 CODEMAP 入口" >&2; exit 2; }
+      INDEX_ARG="$1"
+      shift
+      ;;
+  esac
+done
 
-INDEX="${1:-.map/CODEMAP.md}"
+INDEX="${INDEX_ARG:-${MAP_ROOT:-.map}/CODEMAP.md}"
 [ -f "$INDEX" ] || { echo "CODEMAP 不存在：$INDEX" >&2; exit 1; }
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
@@ -18,7 +37,15 @@ MAP_DIR="$(cd "$(dirname "$INDEX")" && pwd -P)"
 INDEX_ABS="$MAP_DIR/$(basename "$INDEX")"
 ROOT_RAW="$(git -C "$MAP_DIR" rev-parse --show-toplevel 2>/dev/null || pwd -P)"
 ROOT="$(cd "$ROOT_RAW" && pwd -P)"
-EXPECTED_INDEX="$ROOT/.map/CODEMAP.md"
+if [ -n "$MAP_ROOT" ]; then
+  case "$MAP_ROOT" in
+    /*) EXPECTED_INDEX="$MAP_ROOT/CODEMAP.md" ;;
+    *) EXPECTED_INDEX="$ROOT/$MAP_ROOT/CODEMAP.md" ;;
+  esac
+else
+  EXPECTED_INDEX="$ROOT/.map/CODEMAP.md"
+fi
+EXPECTED_INDEX="$(cd "$(dirname "$EXPECTED_INDEX")" && pwd -P)/CODEMAP.md"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/codemap-check.XXXXXX")"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
@@ -63,15 +90,15 @@ echo "root: $ROOT"
 echo
 
 if [ "$INDEX_ABS" != "$EXPECTED_INDEX" ]; then
-  error "L1 必须位于 .map/CODEMAP.md，当前为：${INDEX_ABS#$ROOT/}"
+  error "L1 必须位于当前地图根的 CODEMAP.md，当前为：${INDEX_ABS#$ROOT/}"
 fi
 
 while IFS= read -r legacy; do
   [ -n "$legacy" ] || continue
   error "发现旧地图，必须迁移到 .map 后删除旧文件：${legacy#$ROOT/}"
 done < <(
-  find "$ROOT/.claude" -type f \( -name 'CODEMAP*.md' -o -name 'MAPCODE*.md' \) 2>/dev/null
-  find "$ROOT/.codex" -type f \( -name 'CODEMAP*.md' -o -name 'MAPCODE*.md' \) 2>/dev/null
+  find "$ROOT/.claude" -type f -name 'CODEMAP*.md' 2>/dev/null
+  find "$ROOT/.codex" -type f -name 'CODEMAP*.md' 2>/dev/null
 )
 
 for heading in "任务路由" "核心领域"; do
@@ -81,7 +108,7 @@ done
 while IFS= read -r nested; do
   [ -n "$nested" ] || continue
   error "CODEMAP 文件禁止嵌套：${nested#$ROOT/}"
-done < <(find "$ROOT/.map" -mindepth 2 -type f -name 'CODEMAP*.md' 2>/dev/null)
+done < <(find "$MAP_DIR" -mindepth 2 -type f -name 'CODEMAP*.md' ! -path "$MAP_DIR/next/*" 2>/dev/null)
 
 # Check every CODEMAP-looking link, including malformed and missing targets.
 while IFS= read -r target; do
@@ -189,9 +216,9 @@ echo
 echo "== Graph =="
 GRAPH_DIR="$MAP_DIR/graphs"
 if [ ! -d "$GRAPH_DIR" ]; then
-  error "缺少 .map/graphs；关系结构必须使用 Graph YAML"
+  error "缺少 ${GRAPH_DIR#$ROOT/}；关系结构必须使用 Graph YAML"
 else
-  graph_args=(--root "$ROOT" --refs-out "$GRAPH_REFS" --views-out "$GRAPH_VIEWS")
+  graph_args=(--root "$ROOT" --map-root "$MAP_DIR" --refs-out "$GRAPH_REFS" --views-out "$GRAPH_VIEWS")
   [ "$STRICT" -eq 1 ] && graph_args=(--strict "${graph_args[@]}")
   if ! "$SCRIPT_DIR/check_graph" "${graph_args[@]}" "$GRAPH_DIR"; then
     error "Graph 校验未通过"

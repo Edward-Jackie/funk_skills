@@ -1,8 +1,8 @@
 # Graph Schema
 
-Graph YAML 是关系结构的唯一事实源；Mermaid 只是生成视图，不允许从 Mermaid 或 Markdown 反向更新 YAML。
+Graph YAML 是关系结构的唯一事实源；Mermaid、Web Explorer 和 AI 上下文包都是派生视图，不允许反向更新 YAML。
 
-当前 renderer 是 Codemap 的窄实现。未来有公共 flow renderer 时，应让 `render_graph` 适配或委托公共实现，不在 Codemap 和正向生码工具中长期维护两套渲染逻辑。
+新版只接受 `codemap.graph/v2`。旧 Graph 不自动升级；重建时从源码、测试、运行证据和人工确认规则重新取证，避免把旧结构的噪音带入新图。
 
 ## 文件位置
 
@@ -11,63 +11,90 @@ Graph YAML 是关系结构的唯一事实源；Mermaid 只是生成视图，不�
 .map/views/<flow>.mmd
 ```
 
-文件名、Graph ID、节点 ID 和边 ID 使用小写英文、数字和连字符。Summary 图最多 12 个节点，detail 图最多 18 个节点。
+文件名、Graph ID、节点 ID、边 ID 和泳道 ID 使用小写英文、数字和连字符。Summary 图最多 12 个节点，detail 图最多 18 个节点。
 
-## 完整结构
+## v2 完整结构
 
 ```yaml
-schema: codemap.graph/v1
+schema: codemap.graph/v2
 id: billing-settlement
-title: 结算主链
-kind: control                 # control | data | business | state | dependency
+title: 计费结算与分佣
+domain: billing
+summary: 从请求预扣、实际结算、账单落库到日结分佣
+kind: business                 # control | data | business | state | dependency
 level: summary                # summary | detail
 parent: null                  # detail 图填写 { graph: <id>, node: <id> }
 status: current               # current | needs-review | stale | conflict
-verified_at: 2026-09-24
+verified_at: 2026-09-28
 verified_commit: 0123456789abcdef
 view: ../views/billing-settlement.mmd
 
+layout:
+  default: swimlane           # force | swimlane | layered | state
+  direction: LR               # LR | TB
+  lanes:
+    - id: proxy
+      label: 实时请求
+      order: 1
+    - id: storage
+      label: 异步账单
+      order: 2
+
 nodes:
-  - id: request
-    label: 接收结算请求
-    kind: entry               # entry | process | decision | state | store | external | terminal
-    level: 0                  # 逻辑层级，非渲染坐标
-    detail: 校验调用方和基础字段
+  - id: preconsume
+    label: 预扣余额与额度
+    kind: process              # entry | process | decision | state | store | external | terminal
+    lane: proxy                # layout 声明 lanes 时必填
+    level: 1                   # 逻辑层级，非渲染坐标
+    detail: Redis Lua 原子冻结钱包、企业额度与 Key 额度
+    tags: [billing, quota, redis]
     sub: null                 # 或相对当前 YAML 的 detail Graph 路径
+    context:
+      load: required           # required | optional
+      markdown:
+        - path: .map/CODEMAP-billing.md
+          heading: 实时计费主链
     refs:
-      - path: internal/billing/service.go
-        symbol: Settle
+      - path: proxy/service/billing_service.go
+        symbol: func PreConsume
     evidence:
       level: source-verified
-      note: 已核对入口函数
-
-  - id: accepted
-    label: 进入结算
-    kind: process
-    level: 1
-    detail: null
-    sub: billing-settlement-detail.yaml
-    refs: []
-    evidence:
-      level: unverified
-      note: 细节由 sub Graph 展开
+      note: 已核对原子预扣入口
 
 edges:
-  - id: request-to-accepted
-    from: request
-    to: accepted
-    label: 校验通过
-    condition: validation == passed   # 无条件边显式写 always
+  - id: preconsume-to-provider
+    from: preconsume
+    to: provider
+    kind: sync                 # sync | async | read | write | schedule | compensate | depends-on | transition
+    label: 放行请求
+    condition: 预扣成功       # 无条件边显式写 always
     detail: null
     refs:
-      - path: internal/billing/service.go
-        symbol: Settle
+      - path: proxy/controller/proxy_controller.go
+        symbol: service.PreConsume
     evidence:
       level: source-verified
-      note: 显式分支
+      note: 预扣成功后才调用上游
 
 cycles: []                    # 每个实际有向环都必须声明
 ```
+
+## 布局语义
+
+- `force`：发现全局或局部关系，不表达严格先后。
+- `swimlane`：跨角色、服务或存储的业务链；节点按 `lane` 分组，`level` 表示主顺序。
+- `layered`：普通调用链或数据流；按 `level` 分层。
+- `state`：生命周期和状态迁移；边通常使用 `transition`。
+- `direction` 只影响生成视图，不改变业务语义。
+- 不保存坐标。布局算法、折叠状态、筛选条件和镜头位置都属于视图状态。
+
+`layout.lanes` 存在时，每个节点必须引用已声明的 `lane`。泳道按 `order` 排序，顺序相同时按声明顺序。
+
+## tags 与 context
+
+- `tags` 用于需求检索，保存稳定业务词，不堆函数名和同义词。
+- `context.load: required` 表示命中节点时默认加载对应 Markdown 章节；`optional` 只输出引用，由 AI 判断是否继续读取。
+- `context.markdown[].path` 必须是仓库内已存在的相对路径；`heading` 必须是非空章节名。查询器只输出章节引用，不复制整份领域包。
 
 ## detail 与 sub
 
@@ -88,9 +115,9 @@ refs:
     symbol: billing.retry.max_attempts
 ```
 
-路径必须存在。代码符号由 `check_map.sh` 做定义式匹配；SQL 和配置键做字面匹配。外部系统或人工材料写进 `evidence.note`，不要伪造成代码路径。
+路径必须存在。代码符号由 `check_map.sh` 做字面匹配；外部系统或人工材料写进 `evidence.note`，不要伪造成代码路径。
 
-## condition
+## condition 与边类型
 
 每条边都必须有非空 `condition`：
 
@@ -98,7 +125,15 @@ refs:
 - 判断分支：写能区分其他出边的条件，例如 `balance >= amount`
 - 重试/补偿：写触发条件，例如 `timeout && attempts < max_attempts`
 
-同一 decision 节点的出边条件不得重复。
+同一 decision 节点的出边条件不得重复。边类型的含义：
+
+- `sync`：同步控制流。
+- `async`：消息、队列或后台异步处理。
+- `read` / `write`：主要语义是读写存储。
+- `schedule`：定时任务触发。
+- `compensate`：回滚、退款或人工补偿。
+- `depends-on`：结构依赖，不表示调用顺序。
+- `transition`：状态迁移。
 
 ## evidence
 

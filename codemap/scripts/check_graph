@@ -3,7 +3,7 @@
 # requires-python = ">=3.10"
 # dependencies = ["PyYAML>=6.0.2,<7"]
 # ///
-"""Validate Codemap Graph YAML and optionally export refs/views for check_map.sh."""
+"""校验 Codemap Graph YAML，并按需为 check_map.sh 导出 refs 与视图。"""
 
 from __future__ import annotations
 
@@ -19,10 +19,15 @@ import yaml
 
 ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+SCHEMA = "codemap.graph/v2"
 KINDS = {"control", "data", "business", "state", "dependency"}
 LEVELS = {"summary": 12, "detail": 18}
 STATUSES = {"current", "needs-review", "stale", "conflict"}
 NODE_KINDS = {"entry", "process", "decision", "state", "store", "external", "terminal"}
+LAYOUTS = {"force", "swimlane", "layered", "state"}
+DIRECTIONS = {"LR", "TB"}
+EDGE_KINDS = {"sync", "async", "read", "write", "schedule", "compensate", "depends-on", "transition"}
+CONTEXT_LOADS = {"required", "optional"}
 EVIDENCE_LEVELS = {
     "human-confirmed",
     "source-verified",
@@ -104,9 +109,9 @@ def strongly_connected(nodes: set[str], edges: list[tuple[str, str]]) -> list[fr
 
 
 class Validator:
-    def __init__(self, root: Path, strict: bool, skip_view_check: bool) -> None:
+    def __init__(self, root: Path, map_dir: Path, strict: bool, skip_view_check: bool) -> None:
         self.root = root
-        self.map_dir = root / ".map"
+        self.map_dir = map_dir
         self.graph_dir = self.map_dir / "graphs"
         self.view_dir = self.map_dir / "views"
         self.strict = strict
@@ -193,12 +198,13 @@ class Validator:
 
     def validate_graph(self, file: Path, graph: dict[str, Any]) -> None:
         if not inside(file, self.graph_dir):
-            self.error(file, "Graph YAML 必须位于项目根目录 .map/graphs")
+            self.error(file, f"Graph YAML 必须位于 {self.rel(self.graph_dir)}")
         if file.suffix not in {".yaml", ".yml"} or not ID_RE.fullmatch(file.stem):
             self.error(file, "Graph 文件名必须使用小写英文、数字和连字符")
 
-        if graph.get("schema") != "codemap.graph/v1":
-            self.error(file, "schema 必须为 codemap.graph/v1")
+        schema = graph.get("schema")
+        if schema != SCHEMA:
+            self.error(file, f"schema 必须为 {SCHEMA}：{schema!r}")
 
         graph_id = graph.get("id")
         if not isinstance(graph_id, str) or not ID_RE.fullmatch(graph_id):
@@ -211,8 +217,46 @@ class Validator:
 
         if not isinstance(graph.get("title"), str) or not graph["title"].strip():
             self.error(file, "title 不能为空")
+        if not isinstance(graph.get("domain"), str) or not ID_RE.fullmatch(graph["domain"]):
+            self.error(file, f"v2 domain 非法：{graph.get('domain')!r}")
+        if "summary" in graph and (
+            graph["summary"] is not None and not isinstance(graph["summary"], str)
+        ):
+            self.error(file, "v2 summary 必须是字符串或 null")
         if graph.get("kind") not in KINDS:
             self.error(file, f"kind 非法：{graph.get('kind')!r}")
+
+        lane_ids: set[str] = set()
+        layout = graph.get("layout")
+        if not isinstance(layout, dict):
+            self.error(file, "v2 layout 必须是 mapping")
+            layout = {}
+        if layout.get("default") not in LAYOUTS:
+            self.error(file, f"layout.default 非法：{layout.get('default')!r}")
+        if layout.get("direction") not in DIRECTIONS:
+            self.error(file, f"layout.direction 非法：{layout.get('direction')!r}")
+        lanes = layout.get("lanes", [])
+        if not isinstance(lanes, list):
+            self.error(file, "layout.lanes 必须是列表")
+            lanes = []
+        for index, lane in enumerate(lanes):
+            owner = f"layout.lanes[{index}]"
+            if not isinstance(lane, dict):
+                self.error(file, f"{owner} 必须是 mapping")
+                continue
+            lane_id = lane.get("id")
+            if not isinstance(lane_id, str) or not ID_RE.fullmatch(lane_id):
+                self.error(file, f"{owner}.id 非法：{lane_id!r}")
+            elif lane_id in lane_ids:
+                self.error(file, f"泳道 id 重复：{lane_id}")
+            else:
+                lane_ids.add(lane_id)
+            if not isinstance(lane.get("label"), str) or not lane["label"].strip():
+                self.error(file, f"{owner}.label 不能为空")
+            if not isinstance(lane.get("order"), int) or lane["order"] < 0:
+                self.error(file, f"{owner}.order 必须是非负整数")
+        if layout.get("default") == "swimlane" and not lane_ids:
+            self.error(file, "swimlane 布局必须声明 layout.lanes")
 
         level = graph.get("level")
         if level not in LEVELS:
@@ -306,6 +350,43 @@ class Validator:
                 self.error(file, f"node {node_id} 的 label 不能为空")
             if node.get("kind") not in NODE_KINDS:
                 self.error(file, f"node {node_id} 的 kind 非法：{node.get('kind')!r}")
+            lane = node.get("lane")
+            if lane_ids and lane not in lane_ids:
+                self.error(file, f"node {node_id} 的 lane 未声明：{lane!r}")
+            if not lane_ids and lane is not None:
+                self.error(file, f"node {node_id} 声明了 lane，但 layout.lanes 为空")
+            tags = node.get("tags")
+            if not isinstance(tags, list) or any(not isinstance(tag, str) or not tag.strip() for tag in tags):
+                self.error(file, f"node {node_id} 的 tags 必须是非空字符串列表，可为空列表")
+            context = node.get("context")
+            if context is not None:
+                if not isinstance(context, dict):
+                    self.error(file, f"node {node_id} 的 context 必须是 mapping 或 null")
+                else:
+                    if context.get("load") not in CONTEXT_LOADS:
+                        self.error(file, f"node {node_id} 的 context.load 非法：{context.get('load')!r}")
+                    markdown = context.get("markdown")
+                    if not isinstance(markdown, list) or not markdown:
+                        self.error(file, f"node {node_id} 的 context.markdown 必须是非空列表")
+                        markdown = []
+                    for context_index, item in enumerate(markdown):
+                        context_owner = f"node {node_id}.context.markdown[{context_index}]"
+                        if not isinstance(item, dict):
+                            self.error(file, f"{context_owner} 必须是 mapping")
+                            continue
+                        path_value = item.get("path")
+                        heading = item.get("heading")
+                        if not isinstance(path_value, str) or not path_value.strip():
+                            self.error(file, f"{context_owner}.path 不能为空")
+                        else:
+                            context_path = Path(path_value)
+                            absolute_context = (self.root / context_path).resolve()
+                            if context_path.is_absolute() or ".." in context_path.parts or not inside(absolute_context, self.root):
+                                self.error(file, f"{context_owner}.path 必须是仓库内相对路径：{path_value}")
+                            elif not absolute_context.is_file():
+                                self.error(file, f"{context_owner}.path 不存在：{path_value}")
+                        if not isinstance(heading, str) or not heading.strip():
+                            self.error(file, f"{context_owner}.heading 不能为空")
             if not isinstance(node.get("level"), int) or node["level"] < 0:
                 self.error(file, f"node {node_id} 的 level 必须是非负整数")
             if "detail" not in node or (node["detail"] is not None and not isinstance(node["detail"], str)):
@@ -347,6 +428,8 @@ class Validator:
                 edge_pairs.append((source, target))
                 degree[source] += 1
                 degree[target] += 1
+            if edge.get("kind") not in EDGE_KINDS:
+                self.error(file, f"edge {edge_id} 的 kind 非法：{edge.get('kind')!r}")
             condition = edge.get("condition")
             if not isinstance(condition, str) or not condition.strip():
                 self.error(file, f"edge {edge_id} 缺少 condition；无条件边写 always")
@@ -449,6 +532,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("path", type=Path, help="Graph YAML file or directory")
     parser.add_argument("--root", type=Path, help="project root; defaults to Git root")
+    parser.add_argument("--map-root", type=Path, help="地图根目录；默认从 graphs 目录推断，否则使用 .map")
     parser.add_argument("--strict", action="store_true", help="treat warnings as failure")
     parser.add_argument("--refs-out", type=Path, help="write path/symbol/source/commit TSV")
     parser.add_argument("--views-out", type=Path, help="write graph/view TSV")
@@ -457,7 +541,15 @@ def main() -> int:
 
     target = args.path.resolve()
     root = args.root.resolve() if args.root else find_root(target)
-    validator = Validator(root, args.strict, args.skip_view_check)
+    if args.map_root:
+        map_dir = args.map_root.resolve() if args.map_root.is_absolute() else (root / args.map_root).resolve()
+    elif target.is_dir() and target.name == "graphs":
+        map_dir = target.parent
+    elif target.is_file() and target.parent.name == "graphs":
+        map_dir = target.parent.parent
+    else:
+        map_dir = (root / ".map").resolve()
+    validator = Validator(root, map_dir, args.strict, args.skip_view_check)
 
     files = collect_files(target, validator)
     if not files:

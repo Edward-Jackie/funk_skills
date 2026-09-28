@@ -1,4 +1,4 @@
 interface:
   display_name: "Code Map"
-  short_description: "生成结构化代码导航，并为高风险业务补充规则与验证地图"
-  default_prompt: "使用 $codemap 为当前项目建立按需加载的代码与业务导航地图。"
+  short_description: "生成 AI 导航、需求影响图和 Git Diff 业务反查"
+  default_prompt: "使用 $codemap 从源码建立按需加载的 Graph v2，生成本地业务视图，并支持需求与代码改动的双向影响分析。"

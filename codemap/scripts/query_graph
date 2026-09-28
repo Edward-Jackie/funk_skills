@@ -1,0 +1,427 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["PyYAML>=6.0.2,<7"]
+# ///
+"""按需求检索 Codemap Graph，并输出有限跳数的最小 AI 上下文。"""
+
+from __future__ import annotations
+
+import argparse
+import re
+import subprocess
+from collections import deque
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+
+GRAPH_SCHEMA = "codemap.graph/v2"
+OVERLAY_SCHEMA = "codemap.overlay/v1"
+OVERLAY_ACTIONS = {"add", "modify", "risk", "remove"}
+
+
+def git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(root), *args],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+
+
+def find_root(path: Path) -> Path:
+    probe = path if path.is_dir() else path.parent
+    result = git(probe, "rev-parse", "--show-toplevel")
+    return Path(result.stdout.strip()).resolve() if result.returncode == 0 else Path.cwd().resolve()
+
+
+def load_yaml(path: Path) -> dict[str, Any]:
+    try:
+        value = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, yaml.YAMLError) as exc:
+        raise ValueError(f"无法读取 {path}：{exc}") from exc
+    if not isinstance(value, dict):
+        raise ValueError(f"{path} 的根节点必须是 mapping")
+    return value
+
+
+def graph_files(path: Path) -> list[Path]:
+    if path.is_file():
+        return [path]
+    return sorted([*path.rglob("*.yaml"), *path.rglob("*.yml")])
+
+
+def tokens(value: str) -> set[str]:
+    normalized = value.casefold()
+    result = set(re.findall(r"[a-z0-9_.:/-]+", normalized))
+    for segment in re.findall(r"[\u3400-\u9fff]+", normalized):
+        result.add(segment)
+        if len(segment) > 1:
+            result.update(segment[index : index + 2] for index in range(len(segment) - 1))
+    compact = re.sub(r"\s+", "", normalized)
+    if compact:
+        result.add(compact)
+    return {item for item in result if item}
+
+
+def refs_text(refs: Any) -> str:
+    if not isinstance(refs, list):
+        return ""
+    parts: list[str] = []
+    for ref in refs:
+        if isinstance(ref, dict):
+            parts.extend(str(ref.get(key, "")) for key in ("path", "symbol"))
+    return " ".join(parts)
+
+
+def node_text(graph: dict[str, Any], node: dict[str, Any]) -> str:
+    context = node.get("context") if isinstance(node.get("context"), dict) else {}
+    markdown = context.get("markdown") if isinstance(context.get("markdown"), list) else []
+    markdown_text = " ".join(
+        f"{item.get('path', '')} {item.get('heading', '')}" for item in markdown if isinstance(item, dict)
+    )
+    return " ".join(
+        [
+            str(graph.get("id", "")),
+            str(graph.get("title", "")),
+            str(graph.get("domain", "")),
+            str(graph.get("summary", "")),
+            str(node.get("id", "")),
+            str(node.get("label", "")),
+            str(node.get("detail", "")),
+            " ".join(str(item) for item in node.get("tags", []) if isinstance(item, str)),
+            refs_text(node.get("refs")),
+            markdown_text,
+        ]
+    ).casefold()
+
+
+def match_score(query: str, query_tokens: set[str], text: str) -> int:
+    score = 0
+    compact_query = re.sub(r"\s+", "", query.casefold())
+    compact_text = re.sub(r"\s+", "", text)
+    if compact_query and compact_query in compact_text:
+        score += 20
+    text_tokens = tokens(text)
+    for item in query_tokens:
+        if item in text_tokens:
+            score += 5 if len(item) > 1 else 1
+        elif len(item) > 1 and item in text:
+            score += 2
+    return score
+
+
+def load_graphs(path: Path) -> tuple[dict[str, dict[str, Any]], dict[str, Path]]:
+    graphs: dict[str, dict[str, Any]] = {}
+    sources: dict[str, Path] = {}
+    for file in graph_files(path):
+        graph = load_yaml(file)
+        if graph.get("schema") != GRAPH_SCHEMA:
+            raise ValueError(f"{file} 不是 {GRAPH_SCHEMA}，查询器禁止混入旧 Graph")
+        graph_id = graph.get("id")
+        if not isinstance(graph_id, str) or not graph_id:
+            raise ValueError(f"{file} 缺少有效 Graph id")
+        if graph_id in graphs:
+            raise ValueError(f"Graph id 重复：{graph_id}")
+        graphs[graph_id] = graph
+        sources[graph_id] = file
+    if not graphs:
+        raise ValueError(f"{path} 未找到 Codemap Graph")
+    return graphs, sources
+
+
+def load_overlays(paths: list[Path], graphs: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    overlays: list[dict[str, Any]] = []
+    node_ids = {
+        graph_id: {node.get("id") for node in graph.get("nodes", []) if isinstance(node, dict)}
+        for graph_id, graph in graphs.items()
+    }
+    edge_ids = {
+        graph_id: {edge.get("id") for edge in graph.get("edges", []) if isinstance(edge, dict)}
+        for graph_id, graph in graphs.items()
+    }
+    for path in paths:
+        overlay = load_yaml(path)
+        if overlay.get("schema") != OVERLAY_SCHEMA:
+            raise ValueError(f"{path} schema 必须为 {OVERLAY_SCHEMA}")
+        if overlay.get("status") != "proposal":
+            raise ValueError(f"{path} status 必须为 proposal")
+        base_graphs = overlay.get("base_graphs")
+        if not isinstance(base_graphs, list) or any(item not in graphs for item in base_graphs):
+            raise ValueError(f"{path} base_graphs 包含未知 Graph")
+        nodes = overlay.get("nodes", [])
+        edges = overlay.get("edges", [])
+        if not isinstance(nodes, list) or not isinstance(edges, list):
+            raise ValueError(f"{path} nodes 与 edges 必须是列表")
+        added_nodes: dict[str, set[str]] = {}
+        for item in nodes:
+            if not isinstance(item, dict) or item.get("action") not in OVERLAY_ACTIONS:
+                raise ValueError(f"{path} nodes 存在非法 action")
+            graph_id = item.get("graph")
+            item_id = item.get("id")
+            if graph_id not in graphs or not isinstance(item_id, str) or not item_id:
+                raise ValueError(f"{path} nodes 引用了未知 Graph 或缺少 id")
+            if not isinstance(item.get("reason") or item.get("detail"), str):
+                raise ValueError(f"{path} node {item_id} 缺少 reason 或 detail")
+            if item.get("action") == "add":
+                if item_id in node_ids[graph_id] or item_id in added_nodes.setdefault(graph_id, set()):
+                    raise ValueError(f"{path} 新增 node id 已存在：{graph_id}:{item_id}")
+                added_nodes[graph_id].add(item_id)
+                evidence = item.get("evidence")
+                if not isinstance(evidence, dict) or evidence.get("level") != "unverified":
+                    raise ValueError(f"{path} 新增 node 必须标记 unverified")
+            elif item_id not in node_ids[graph_id]:
+                raise ValueError(f"{path} node 影响目标不存在：{graph_id}:{item_id}")
+        for item in edges:
+            if not isinstance(item, dict) or item.get("action") not in OVERLAY_ACTIONS:
+                raise ValueError(f"{path} edges 存在非法 action")
+            graph_id = item.get("graph")
+            item_id = item.get("id")
+            if graph_id not in graphs or not isinstance(item_id, str) or not item_id:
+                raise ValueError(f"{path} edges 引用了未知 Graph 或缺少 id")
+            if not isinstance(item.get("reason") or item.get("detail"), str):
+                raise ValueError(f"{path} edge {item_id} 缺少 reason 或 detail")
+            if item.get("action") == "add":
+                if item_id in edge_ids[graph_id]:
+                    raise ValueError(f"{path} 新增 edge id 已存在：{graph_id}:{item_id}")
+                valid_nodes = node_ids[graph_id] | added_nodes.get(graph_id, set())
+                if item.get("from") not in valid_nodes or item.get("to") not in valid_nodes:
+                    raise ValueError(f"{path} 新增 edge 存在悬空端点：{graph_id}:{item_id}")
+                evidence = item.get("evidence")
+                if not isinstance(evidence, dict) or evidence.get("level") != "unverified":
+                    raise ValueError(f"{path} 新增 edge 必须标记 unverified")
+            elif item_id not in edge_ids[graph_id]:
+                raise ValueError(f"{path} edge 影响目标不存在：{graph_id}:{item_id}")
+        overlays.append(overlay)
+    return overlays
+
+
+def adjacency(graph: dict[str, Any]) -> dict[str, set[str]]:
+    result = {node["id"]: set() for node in graph.get("nodes", []) if isinstance(node, dict) and "id" in node}
+    for edge in graph.get("edges", []):
+        if not isinstance(edge, dict):
+            continue
+        source = edge.get("from")
+        target = edge.get("to")
+        if source in result and target in result:
+            result[source].add(target)
+            result[target].add(source)
+    return result
+
+
+def overlay_targets(overlays: list[dict[str, Any]]) -> dict[str, set[str]]:
+    targets: dict[str, set[str]] = {}
+    for overlay in overlays:
+        for item in overlay.get("nodes", []):
+            if not isinstance(item, dict):
+                continue
+            graph_id = item.get("graph")
+            node_id = item.get("id")
+            if item.get("action") != "add" and isinstance(graph_id, str) and isinstance(node_id, str):
+                targets.setdefault(graph_id, set()).add(node_id)
+        for item in overlay.get("edges", []):
+            if not isinstance(item, dict):
+                continue
+            graph_id = item.get("graph")
+            if not isinstance(graph_id, str):
+                continue
+            for key in ("from", "to"):
+                node_id = item.get(key)
+                if isinstance(node_id, str):
+                    targets.setdefault(graph_id, set()).add(node_id)
+    return targets
+
+
+def select_nodes(
+    graphs: dict[str, dict[str, Any]], query: str, depth: int, max_nodes: int, overlays: list[dict[str, Any]]
+) -> dict[str, set[str]]:
+    query_tokens = tokens(query)
+    forced = overlay_targets(overlays)
+    ranked: list[tuple[int, str, str]] = []
+    for graph_id, graph in graphs.items():
+        for node in graph.get("nodes", []):
+            if not isinstance(node, dict) or not isinstance(node.get("id"), str):
+                continue
+            score = match_score(query, query_tokens, node_text(graph, node))
+            if node["id"] in forced.get(graph_id, set()):
+                score += 100
+            if score > 0:
+                ranked.append((score, graph_id, node["id"]))
+    ranked.sort(key=lambda item: (-item[0], item[1], item[2]))
+    seeds = ranked[: min(3, max_nodes)]
+    selected: dict[str, set[str]] = {}
+    queue: deque[tuple[str, str, int]] = deque()
+    for _, graph_id, node_id in seeds:
+        if sum(len(items) for items in selected.values()) >= max_nodes:
+            break
+        if node_id not in selected.setdefault(graph_id, set()):
+            selected[graph_id].add(node_id)
+            queue.append((graph_id, node_id, 0))
+
+    graph_adjacency = {graph_id: adjacency(graph) for graph_id, graph in graphs.items()}
+    while queue and sum(len(items) for items in selected.values()) < max_nodes:
+        graph_id, node_id, distance = queue.popleft()
+        if distance >= depth:
+            continue
+        for neighbor in sorted(graph_adjacency[graph_id].get(node_id, set())):
+            if neighbor in selected[graph_id]:
+                continue
+            selected[graph_id].add(neighbor)
+            queue.append((graph_id, neighbor, distance + 1))
+            if sum(len(items) for items in selected.values()) >= max_nodes:
+                break
+    return {graph_id: node_ids for graph_id, node_ids in selected.items() if node_ids}
+
+
+def ref_line(ref: dict[str, Any]) -> str:
+    symbol = ref.get("symbol")
+    return f"`{ref.get('path')}`" + (f" → `{symbol}`" if symbol else "")
+
+
+def render_context(
+    query: str,
+    selected: dict[str, set[str]],
+    graphs: dict[str, dict[str, Any]],
+    sources: dict[str, Path],
+    overlays: list[dict[str, Any]],
+    root: Path,
+) -> str:
+    lines = ["# Codemap 按需上下文", "", f"> 查询：{query}", ""]
+    if not selected:
+        lines.extend(["未命中结构化 Graph。请回到 `.map/CODEMAP.md` 路由或源码搜索，不要把未命中解释为业务不存在。", ""])
+    context_refs: set[tuple[str, str, str]] = set()
+    source_refs: set[tuple[str, str]] = set()
+
+    for graph_id in sorted(selected):
+        graph = graphs[graph_id]
+        node_ids = selected[graph_id]
+        source = sources[graph_id]
+        try:
+            source_label = str(source.relative_to(root))
+        except ValueError:
+            source_label = str(source)
+        lines.extend(
+            [
+                f"## {graph.get('title', graph_id)}",
+                "",
+                f"- Graph：`{graph_id}`（`{graph.get('status', 'unknown')}`）",
+                f"- 来源：`{source_label}`",
+                f"- 摘要：{graph.get('summary') or '未填写'}",
+                "",
+                "### 命中节点",
+                "",
+            ]
+        )
+        nodes = [node for node in graph.get("nodes", []) if isinstance(node, dict) and node.get("id") in node_ids]
+        nodes.sort(key=lambda item: (item.get("level", 0), item.get("id", "")))
+        for node in nodes:
+            evidence = node.get("evidence") if isinstance(node.get("evidence"), dict) else {}
+            lines.append(f"- **{node.get('label')}** (`{node.get('id')}`)：{node.get('detail') or '无补充'}")
+            lines.append(f"  - 证据：`{evidence.get('level', 'unknown')}`；{evidence.get('note', '无说明')}")
+            for ref in node.get("refs", []):
+                if isinstance(ref, dict):
+                    lines.append(f"  - 锚点：{ref_line(ref)}")
+                    source_refs.add((str(ref.get("path", "")), str(ref.get("symbol") or "")))
+            context = node.get("context") if isinstance(node.get("context"), dict) else {}
+            for item in context.get("markdown", []):
+                if isinstance(item, dict):
+                    load = str(context.get("load", "optional"))
+                    lines.append(f"  - 文档：`{item.get('path')}` → **{item.get('heading')}**（{load}）")
+                    context_refs.add((str(item.get("path", "")), str(item.get("heading", "")), load))
+
+        visible_edges = [
+            edge
+            for edge in graph.get("edges", [])
+            if isinstance(edge, dict) and edge.get("from") in node_ids and edge.get("to") in node_ids
+        ]
+        if visible_edges:
+            lines.extend(["", "### 关联边", ""])
+            for edge in visible_edges:
+                evidence = edge.get("evidence") if isinstance(edge.get("evidence"), dict) else {}
+                label = edge.get("label") or edge.get("condition")
+                lines.append(
+                    f"- `{edge.get('from')}` → `{edge.get('to')}`：{label}；类型 `{edge.get('kind', 'sync')}`；条件 `{edge.get('condition')}`；证据 `{evidence.get('level', 'unknown')}`"
+                )
+                for ref in edge.get("refs", []):
+                    if isinstance(ref, dict):
+                        source_refs.add((str(ref.get("path", "")), str(ref.get("symbol") or "")))
+        lines.append("")
+
+    if overlays:
+        lines.extend(["## 需求 Overlay", ""])
+        for overlay in overlays:
+            lines.append(f"### {overlay.get('title', overlay.get('id'))}")
+            lines.append("")
+            lines.append(f"- 状态：`{overlay.get('status')}`；需求：{overlay.get('query')}")
+            for group, label in (("nodes", "节点"), ("edges", "边")):
+                for item in overlay.get(group, []):
+                    if not isinstance(item, dict):
+                        continue
+                    reason = item.get("reason") or item.get("detail") or "未说明"
+                    lines.append(
+                        f"- {label} `{item.get('graph')}:{item.get('id')}`：`{item.get('action')}`；{reason}"
+                    )
+            lines.append("")
+
+    if context_refs or source_refs:
+        lines.extend(["## 最小读取集", ""])
+        for path, heading, load in sorted(context_refs, key=lambda item: (item[2] != "required", item[0], item[1])):
+            lines.append(f"- `{path}` → **{heading}**（{load}）")
+        for path, symbol in sorted(source_refs):
+            lines.append(f"- `{path}`" + (f" → `{symbol}`" if symbol else ""))
+        lines.append("")
+
+    lines.extend(
+        [
+            "## 使用边界",
+            "",
+            "- 本文件是临时检索结果，不是事实源。",
+            "- `needs-review`、`stale`、`conflict` 和 `unverified` 只能作为定位线索，改代码前必须回到源码核对。",
+            "- Overlay 表达方案影响，不代表功能已经存在。",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("path", type=Path, help="Graph YAML 文件或目录")
+    parser.add_argument("--query", required=True, help="任务、需求或故障现象")
+    parser.add_argument("--depth", type=int, default=2, help="从命中节点扩展的跳数，默认 2")
+    parser.add_argument("--max-nodes", type=int, default=18, help="最多输出节点数，默认 18")
+    parser.add_argument("--overlay", action="append", type=Path, default=[], help="可重复传入需求 Overlay")
+    parser.add_argument("--out", type=Path, help="输出 Markdown；未指定则打印到标准输出")
+    parser.add_argument("--root", type=Path, help="项目根目录；默认自动识别 Git 根")
+    args = parser.parse_args()
+
+    if args.depth < 0 or args.depth > 5:
+        parser.error("--depth 必须在 0 到 5 之间")
+    if args.max_nodes < 1 or args.max_nodes > 100:
+        parser.error("--max-nodes 必须在 1 到 100 之间")
+
+    target = args.path.resolve()
+    root = args.root.resolve() if args.root else find_root(target)
+    try:
+        graphs, sources = load_graphs(target)
+        overlays = load_overlays([path.resolve() for path in args.overlay], graphs)
+        selected = select_nodes(graphs, args.query, args.depth, args.max_nodes, overlays)
+        content = render_context(args.query, selected, graphs, sources, overlays, root)
+    except ValueError as exc:
+        parser.error(str(exc))
+
+    if args.out:
+        output = args.out.resolve()
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(content, encoding="utf-8")
+        print(output)
+    else:
+        print(content, end="")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

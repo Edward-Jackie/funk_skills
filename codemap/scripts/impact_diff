@@ -1,0 +1,375 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["PyYAML>=6.0.2,<7"]
+# ///
+"""把 Git 改动反查到 Codemap Graph 的直接命中与有限下游影响。"""
+
+from __future__ import annotations
+
+import argparse
+import subprocess
+from collections import deque
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+
+GRAPH_SCHEMA = "codemap.graph/v2"
+
+
+def git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(root), *args],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+
+def find_root(path: Path) -> Path:
+    probe = path if path.is_dir() else path.parent
+    result = git(probe, "rev-parse", "--show-toplevel")
+    if result.returncode != 0:
+        raise ValueError(f"无法从 {probe} 找到 Git 仓库")
+    return Path(result.stdout.strip()).resolve()
+
+
+def load_yaml(path: Path) -> dict[str, Any]:
+    try:
+        value = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, yaml.YAMLError) as exc:
+        raise ValueError(f"无法读取 {path}：{exc}") from exc
+    if not isinstance(value, dict):
+        raise ValueError(f"{path} 的根节点必须是 mapping")
+    return value
+
+
+def graph_files(path: Path) -> list[Path]:
+    if path.is_file():
+        return [path]
+    return sorted([*path.rglob("*.yaml"), *path.rglob("*.yml")])
+
+
+def load_graphs(path: Path) -> list[tuple[Path, dict[str, Any]]]:
+    graphs: list[tuple[Path, dict[str, Any]]] = []
+    ids: set[str] = set()
+    for file in graph_files(path):
+        graph = load_yaml(file)
+        if graph.get("schema") != GRAPH_SCHEMA:
+            raise ValueError(f"{file} 不是 {GRAPH_SCHEMA}，影响分析禁止混入旧 Graph")
+        graph_id = graph.get("id")
+        if not isinstance(graph_id, str) or not graph_id:
+            raise ValueError(f"{file} 缺少有效 Graph id")
+        if graph_id in ids:
+            raise ValueError(f"Graph id 重复：{graph_id}")
+        ids.add(graph_id)
+        graphs.append((file, graph))
+    if not graphs:
+        raise ValueError(f"{path} 未找到 {GRAPH_SCHEMA}")
+    return graphs
+
+
+def command_paths(root: Path, *args: str) -> set[str]:
+    result = git(root, *args)
+    if result.returncode != 0:
+        message = result.stderr.strip() or "Git 命令执行失败"
+        raise ValueError(message)
+    return {line.strip() for line in result.stdout.splitlines() if line.strip()}
+
+
+def changed_paths(root: Path, base: str | None) -> set[str]:
+    paths: set[str] = set()
+    if base:
+        verified = git(root, "rev-parse", "--verify", f"{base}^{{commit}}")
+        if verified.returncode != 0:
+            raise ValueError(f"Git 基线不存在：{base}")
+        paths.update(command_paths(root, "diff", "--name-only", "--diff-filter=ACMRTUXB", f"{base}...HEAD"))
+    paths.update(command_paths(root, "diff", "--name-only", "--diff-filter=ACMRTUXB"))
+    paths.update(command_paths(root, "diff", "--cached", "--name-only", "--diff-filter=ACMRTUXB"))
+    paths.update(command_paths(root, "ls-files", "--others", "--exclude-standard"))
+    return paths
+
+
+def normalize_path(root: Path, value: str) -> str:
+    candidate = Path(value)
+    absolute = candidate.resolve() if candidate.is_absolute() else (root / candidate).resolve()
+    try:
+        return absolute.relative_to(root).as_posix()
+    except ValueError as exc:
+        raise ValueError(f"路径不在仓库内：{value}") from exc
+
+
+def ref_paths(item: dict[str, Any]) -> set[str]:
+    result: set[str] = set()
+    refs = item.get("refs")
+    if not isinstance(refs, list):
+        return result
+    for ref in refs:
+        if isinstance(ref, dict) and isinstance(ref.get("path"), str):
+            result.add(Path(ref["path"]).as_posix())
+    return result
+
+
+def adjacency(graph: dict[str, Any]) -> dict[str, list[tuple[str, dict[str, Any]]]]:
+    result = {
+        node["id"]: []
+        for node in graph.get("nodes", [])
+        if isinstance(node, dict) and isinstance(node.get("id"), str)
+    }
+    for edge in graph.get("edges", []):
+        if not isinstance(edge, dict):
+            continue
+        source = edge.get("from")
+        target = edge.get("to")
+        if source in result and target in result:
+            result[source].append((target, edge))
+    return result
+
+
+def graph_impact(graph: dict[str, Any], changes: set[str], depth: int) -> dict[str, Any] | None:
+    nodes = {
+        node["id"]: node
+        for node in graph.get("nodes", [])
+        if isinstance(node, dict) and isinstance(node.get("id"), str)
+    }
+    direct_nodes: dict[str, set[str]] = {}
+    direct_edges: dict[str, set[str]] = {}
+    seeds: set[str] = set()
+
+    for node_id, node in nodes.items():
+        matched = ref_paths(node) & changes
+        if matched:
+            direct_nodes[node_id] = matched
+            seeds.add(node_id)
+
+    for edge in graph.get("edges", []):
+        if not isinstance(edge, dict) or not isinstance(edge.get("id"), str):
+            continue
+        matched = ref_paths(edge) & changes
+        if matched:
+            direct_edges[edge["id"]] = matched
+            if edge.get("from") in nodes:
+                seeds.add(edge["from"])
+            if edge.get("to") in nodes:
+                seeds.add(edge["to"])
+
+    if not seeds:
+        return None
+
+    distances = {node_id: 0 for node_id in seeds}
+    queue: deque[str] = deque(sorted(seeds))
+    forward = adjacency(graph)
+    while queue:
+        node_id = queue.popleft()
+        distance = distances[node_id]
+        if distance >= depth:
+            continue
+        for target, _ in forward.get(node_id, []):
+            if target in distances:
+                continue
+            distances[target] = distance + 1
+            queue.append(target)
+
+    impacted = set(distances)
+    visible_edges = [
+        edge
+        for edge in graph.get("edges", [])
+        if isinstance(edge, dict) and edge.get("from") in impacted and edge.get("to") in impacted
+    ]
+    return {
+        "nodes": nodes,
+        "direct_nodes": direct_nodes,
+        "direct_edges": direct_edges,
+        "distances": distances,
+        "edges": visible_edges,
+    }
+
+
+def ref_line(ref: dict[str, Any]) -> str:
+    symbol = ref.get("symbol")
+    return f"`{ref.get('path')}`" + (f" → `{symbol}`" if symbol else "")
+
+
+def render_report(
+    changes: set[str],
+    graphs: list[tuple[Path, dict[str, Any]]],
+    root: Path,
+    depth: int,
+    base: str | None,
+) -> str:
+    lines = ["# Codemap Git Diff 影响分析", ""]
+    lines.append(f"> 范围：{f'`{base}...HEAD` 加当前工作区' if base else '当前暂存区、工作区和未跟踪文件'}；下游深度：{depth}")
+    lines.extend(["", "## 变更文件", ""])
+    if not changes:
+        lines.extend(["未发现待分析的 Git 改动。", ""])
+    else:
+        lines.extend(f"- `{path}`" for path in sorted(changes))
+        lines.append("")
+
+    matched_paths: set[str] = set()
+    context_refs: set[tuple[str, str, str]] = set()
+    source_refs: set[tuple[str, str]] = set()
+    impact_count = 0
+
+    for source, graph in graphs:
+        impact = graph_impact(graph, changes, depth)
+        if not impact:
+            continue
+        impact_count += 1
+        direct_nodes = impact["direct_nodes"]
+        direct_edges = impact["direct_edges"]
+        distances = impact["distances"]
+        nodes = impact["nodes"]
+        matched_paths.update(path for items in direct_nodes.values() for path in items)
+        matched_paths.update(path for items in direct_edges.values() for path in items)
+        try:
+            source_label = source.relative_to(root).as_posix()
+        except ValueError:
+            source_label = str(source)
+        lines.extend(
+            [
+                f"## {graph.get('title', graph.get('id'))}",
+                "",
+                f"- Graph：`{graph.get('id')}`（`{graph.get('status', 'unknown')}`）",
+                f"- 来源：`{source_label}`",
+                "",
+                "### 直接命中",
+                "",
+            ]
+        )
+        for node_id in sorted(direct_nodes):
+            node = nodes[node_id]
+            files = "、".join(f"`{path}`" for path in sorted(direct_nodes[node_id]))
+            lines.append(f"- 节点 **{node.get('label', node_id)}** (`{node_id}`)：{files}")
+        edge_by_id = {
+            edge.get("id"): edge for edge in graph.get("edges", []) if isinstance(edge, dict)
+        }
+        for edge_id in sorted(direct_edges):
+            edge = edge_by_id[edge_id]
+            files = "、".join(f"`{path}`" for path in sorted(direct_edges[edge_id]))
+            lines.append(
+                f"- 边 `{edge.get('from')}` → `{edge.get('to')}` (`{edge_id}`)：{files}"
+            )
+        if not direct_nodes and not direct_edges:
+            lines.append("- 无")
+
+        downstream = [(distance, node_id) for node_id, distance in distances.items() if distance > 0]
+        lines.extend(["", "### 下游检查范围", ""])
+        if downstream:
+            for distance, node_id in sorted(downstream, key=lambda item: (item[0], item[1])):
+                node = nodes[node_id]
+                lines.append(
+                    f"- {distance} 跳：**{node.get('label', node_id)}** (`{node_id}`)——{node.get('detail') or '无补充'}"
+                )
+        else:
+            lines.append("- 当前深度内没有额外下游节点。")
+
+        if impact["edges"]:
+            lines.extend(["", "### 相关关系", ""])
+            for edge in impact["edges"]:
+                label = edge.get("label") or edge.get("condition") or edge.get("kind", "sync")
+                lines.append(
+                    f"- `{edge.get('from')}` → `{edge.get('to')}`：{label}；类型 `{edge.get('kind', 'sync')}`；条件 `{edge.get('condition')}`"
+                )
+
+        for node_id in distances:
+            node = nodes[node_id]
+            for ref in node.get("refs", []):
+                if isinstance(ref, dict):
+                    source_refs.add((str(ref.get("path", "")), str(ref.get("symbol") or "")))
+            context = node.get("context") if isinstance(node.get("context"), dict) else {}
+            for item in context.get("markdown", []):
+                if isinstance(item, dict):
+                    context_refs.add(
+                        (
+                            str(item.get("path", "")),
+                            str(item.get("heading", "")),
+                            str(context.get("load", "optional")),
+                        )
+                    )
+        lines.append("")
+
+    if impact_count == 0:
+        lines.extend(
+            [
+                "## Graph 命中",
+                "",
+                "没有变更文件命中 Graph 的源码锚点。请回到 `.map/CODEMAP.md` 或源码搜索，不要解释为没有业务影响。",
+                "",
+            ]
+        )
+
+    uncovered = changes - matched_paths
+    lines.extend(["## 未覆盖文件", ""])
+    if uncovered:
+        lines.extend(f"- `{path}`" for path in sorted(uncovered))
+    else:
+        lines.append("- 所有变更文件都至少命中一个 Graph ref。")
+    lines.append("")
+
+    if context_refs or source_refs:
+        lines.extend(["## 建议读取集", ""])
+        for path, heading, load in sorted(
+            context_refs, key=lambda item: (item[2] != "required", item[0], item[1])
+        ):
+            lines.append(f"- `{path}` → **{heading}**（{load}）")
+        for path, symbol in sorted(source_refs):
+            if path:
+                lines.append(f"- {ref_line({'path': path, 'symbol': symbol})}")
+        lines.append("")
+
+    lines.extend(
+        [
+            "## 使用边界",
+            "",
+            "- 直接命中表示 Graph 引用了变更文件，不证明对应业务行为一定改变。",
+            "- 下游节点是按有向边推导的检查范围，不是完整影响证明。",
+            "- 非 `current` Graph 只能作为定位线索，必须先回源码重新验证。",
+            "- 未覆盖文件需要人工判断是实现细节还是地图覆盖缺口。",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("path", type=Path, help="Graph v2 YAML 文件或 graphs 目录")
+    parser.add_argument("--base", help="可选 Git 基线，例如 origin/main")
+    parser.add_argument("--depth", type=int, default=2, help="沿有向边扩展的下游跳数，默认 2")
+    parser.add_argument("--path", action="append", dest="paths", default=[], help="只分析指定仓库相对路径，可重复")
+    parser.add_argument("--out", type=Path, help="输出 Markdown；未指定则打印到标准输出")
+    parser.add_argument("--root", type=Path, help="项目根目录；默认自动识别 Git 根")
+    args = parser.parse_args()
+
+    if args.depth < 0 or args.depth > 5:
+        parser.error("--depth 必须在 0 到 5 之间")
+
+    target = args.path.resolve()
+    try:
+        root = args.root.resolve() if args.root else find_root(target)
+        changes = (
+            {normalize_path(root, value) for value in args.paths}
+            if args.paths
+            else changed_paths(root, args.base)
+        )
+        graphs = load_graphs(target)
+        content = render_report(changes, graphs, root, args.depth, args.base)
+    except ValueError as exc:
+        parser.error(str(exc))
+
+    if args.out:
+        output = args.out.resolve()
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(content, encoding="utf-8")
+        print(output)
+    else:
+        print(content, end="")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -70,9 +70,11 @@ verified-commit: $base
 EOF
 
 cat > "$FIXTURE/.map/graphs/billing-settlement.yaml" <<EOF
-schema: codemap.graph/v1
+schema: codemap.graph/v2
 id: billing-settlement
 title: 结算控制流
+domain: billing
+summary: fixture 结算控制流
 kind: control
 level: summary
 parent: null
@@ -80,10 +82,15 @@ status: current
 verified_at: 2026-09-24
 verified_commit: $base
 view: ../views/billing-settlement.mmd
+layout:
+  default: layered
+  direction: TB
+  lanes: []
 nodes:
   - id: request
     label: 接收请求
     kind: entry
+    tags: []
     level: 0
     detail: null
     sub: null
@@ -96,6 +103,7 @@ nodes:
   - id: settled
     label: 完成结算
     kind: terminal
+    tags: []
     level: 1
     detail: null
     sub: null
@@ -109,6 +117,7 @@ edges:
   - id: request-to-settled
     from: request
     to: settled
+    kind: sync
     label: 执行结算
     condition: always
     detail: null
