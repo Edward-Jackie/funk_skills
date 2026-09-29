@@ -22,6 +22,9 @@
       --danger: #ff7c88;
       --blue: #72bfff;
       --purple: #b7a5ff;
+      --edge: #405a8b;
+      --edge-write: #3387b8;
+      --edge-read: #7160b6;
       --grid-minor: rgba(122, 151, 210, .12);
       --grid-major: rgba(122, 151, 210, .2);
       --shadow: 0 20px 60px rgba(0, 0, 0, .42);
@@ -46,6 +49,9 @@
       --danger: #c45952;
       --blue: #4f6fa6;
       --purple: #7889a7;
+      --edge: #5a544c;
+      --edge-write: #35577f;
+      --edge-read: #574a74;
       --grid-minor: rgba(77, 90, 96, .1);
       --grid-major: rgba(77, 90, 96, .17);
       --shadow: 0 20px 60px rgba(52, 58, 54, .12);
@@ -66,6 +72,9 @@
       --danger: #ff6f7f;
       --blue: #8fc2c5;
       --purple: #bda8f0;
+      --edge: #536b78;
+      --edge-write: #5c9da4;
+      --edge-read: #8370bd;
       --grid-minor: rgba(142, 161, 175, .12);
       --grid-major: rgba(142, 161, 175, .2);
       --shadow: 0 20px 60px rgba(8, 16, 24, .45);
@@ -149,12 +158,12 @@
     .grid-major { stroke: var(--grid-major); stroke-width: 1.25; fill: none; }
     .lane-box { fill: color-mix(in srgb, var(--panel) 66%, transparent); stroke: var(--border); stroke-width: 1; }
     .lane-label { fill: var(--muted); font: 600 11px var(--mono); letter-spacing: .05em; }
-    .edge { fill: none; stroke: color-mix(in srgb, var(--secondary) 58%, transparent); stroke-width: 1.35; pointer-events: none; transition: opacity .2s var(--ease), stroke .2s var(--ease), stroke-width .2s var(--ease); }
+    .edge { fill: none; stroke: var(--edge); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; opacity: .94; pointer-events: none; transition: opacity .2s var(--ease), stroke .2s var(--ease), stroke-width .2s var(--ease), filter .2s var(--ease); }
     .edge-hit { fill: none; stroke: transparent; stroke-width: 18; pointer-events: stroke; cursor: pointer; }
-    .edge.async, .edge.schedule, .edge.compensate { stroke-dasharray: 6 5; animation: edge-flow 2.8s linear infinite; }
+    .edge.async, .edge.schedule, .edge.compensate { stroke-dasharray: 5 6; animation: edge-flow 2.8s linear infinite; }
     .edge.compensate { stroke: var(--danger); }
-    .edge.write { stroke: var(--blue); animation: edge-flow 3.6s linear infinite; }
-    .edge.read { stroke: var(--purple); }
+    .edge.write { stroke: var(--edge-write); animation: edge-flow 3.6s linear infinite; }
+    .edge.read { stroke: var(--edge-read); }
     .edge.overlay-add { stroke: var(--accent); stroke-width: 2.2; }
     .edge.overlay-modify { stroke: var(--warning); stroke-width: 2.2; }
     .edge.overlay-risk { stroke: var(--danger); stroke-width: 2.2; }
@@ -171,7 +180,7 @@
     .node.overlay-remove rect, .node.overlay-remove circle { stroke: var(--danger); stroke-dasharray: 5 4; }
     .node.context-only, .edge.context-only { opacity: .34; }
     .node.dimmed, .edge.dimmed { opacity: .1; }
-    .edge.highlighted, .edge.hovered { stroke: var(--accent); stroke-width: 2.5; opacity: 1; }
+    .edge.highlighted, .edge.hovered { stroke: var(--accent); stroke-width: 2.7; opacity: 1; filter: drop-shadow(0 0 4px color-mix(in srgb, var(--accent) 48%, transparent)); }
     .edge.compensate.highlighted, .edge.compensate.hovered { stroke: var(--danger); }
     .node.endpoint rect, .node.endpoint circle { stroke: color-mix(in srgb, var(--accent) 72%, var(--border)); }
     .empty { display: grid; height: 100%; place-items: center; color: var(--muted); font-size: 12px; }
