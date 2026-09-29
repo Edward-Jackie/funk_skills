@@ -1,5 +1,5 @@
 ---
-name: typesafe-ai-typesafe-ai
+name: good_choise
 license: MIT
 description: >
   Build AI-powered software with TypeSafe: small units of AI intelligence you
