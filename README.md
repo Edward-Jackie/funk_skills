@@ -46,9 +46,11 @@
 | `op7418-nanobanana-ppt-skills` | nanobanana AI 生成 PPT 的完整工作流 |
 | `simonlin1212-a-stock-data` | A股数据获取：行情/研报/资金面/龙虎榜/打板/期权等 43 端点，自包含可运行代码 |
 | `graphify` | 社区项目：任意输入（代码/文档/论文/图像/视频）转知识图谱并支持问答 |
+| `typesafe-ai-typesafe-ai` | TypeSafe/Jev（System One 决策模型）官方开发技能：三种问题原语、state 结构化与路径引用、原子拆分、并行 fan-out、置信度路由与代码组合，不写死 endpoint |
 | `zhanlincui-frontend-design` | 高设计质量的前端界面生成，避免模板化 AI 风格 |
 
 ## 说明
 
 - 第三方 skill 均保留原目录结构，版权归原作者所有
+- `typesafe-ai-typesafe-ai`：上游 <https://github.com/typesafe-ai/skills> 的官方 skill，**已改造成阿里云百炼接入版**（本地 fork，非原样副本）。改动点：① frontmatter `name` 匹配目录名（Claude 规范要求）；② `description` 增加百炼/decision-model-preview/systemone 触发词；③ 顶部新增「本地默认接入：阿里云百炼」一节，写死 workspace 专属域名、`decision-model-preview` 模型名、`instructions` 只接 String、RPM/上下文等实测口径，并给出 curl 与 SDK 样例；④ 正文两处官方结构化 instructions/criteria 写法补了「百炼只走 String」的例外标注。要回到上游原文：`git show HEAD~:typesafe-ai-typesafe-ai/SKILL.md` 或重取 <https://raw.githubusercontent.com/typesafe-ai/skills/main/skills/typesafe-ai/SKILL.md>。（`TYPESAFE_BASE_URL`/`JEV_PROXY_API_KEY` 那两个环境变量是 `kerpopule/hermes-jev-skills` 客户端的东西，跟本 skill 无关）
 - 本仓库整体许可见 [LICENSE](LICENSE)
