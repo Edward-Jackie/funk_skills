@@ -28,7 +28,7 @@ supplies programmable common sense where ordinary code needs semantic understand
 
 ## 本地默认接入：阿里云百炼（决策模型）
 
-> 本节是本地改造，覆盖上方官方文档给出的默认 transport。**协议、问题设计、patterns、cookbooks 全部照用**，只有"打到哪里、叫什么名、哪些参数能传"这三件事按本节改写。生成的任何 curl / SDK / Go 代码都必须使用本节口径，不要输出 `api.typesafe.ai` 或 `jev-latest`。
+> 本节是本地改造，**是本环境唯一的调用口径**，覆盖下方官方文档给出的默认 transport。协议、问题设计、patterns、cookbooks 照用，只有"打到哪里、叫什么名、哪些参数能传"按本节改写。**硬约束：本 skill 一律只调用阿里云百炼；禁止生成或执行任何指向 `api.typesafe.ai`、`dashscope.aliyuncs.com`、Packy 或其它中转的 curl / SDK / Go 代码，也禁止使用 `jev-*` 模型名。** 概念与方法论可以读 TypeSafe 文档，但落地调用只认百炼。
 
 **端点（唯一入口，实测有效）**
 
@@ -90,7 +90,7 @@ curl -sS -X POST "https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-
   -d '{"model":"decision-model-preview","state":{"content":"Order paid, service still down after 24 hours."},"questions":{"escalate":{"type":"noul","instructions":"Should we page on-call now?"}}}'
 ```
 
-**备选通路**：同一模型也能走 Packy 中转——`POST https://cf.api.fan/v1/systemone`，模型名回到 `jev-latest`，且令牌必须属于 `typesafe-officially` 分组（其他分组没有这个模型）。两条路都是 `systemone` 协议，代码里只需换 base_url 与 model。
+**通路唯一性**：本 skill 在本机只经阿里云百炼调用该模型。不要生成任何指向 TypeSafe 官方（`api.typesafe.ai`）、Packy（`cf.api.fan`）或其它中转的代码；上方 SDK 示例里的 `typesafe-sdk` 之所以可用，只是因为把 `base_url` 指到了百炼 compatible-mode，SDK 只是客户端、不代表走官方接口。
 
 ## Read the live docs
 
