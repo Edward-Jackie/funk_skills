@@ -180,6 +180,10 @@
     .node.overlay-remove rect, .node.overlay-remove circle { stroke: var(--danger); stroke-dasharray: 5 4; }
     .node.context-only, .edge.context-only { opacity: .34; }
     .node.dimmed, .edge.dimmed { opacity: .1; }
+    #viewport.has-hover-focus .node:not(.hover-related) { opacity: .14; }
+    #viewport.has-hover-focus [data-edge]:not(.hover-related) .edge { opacity: .12; }
+    #viewport.has-hover-focus .node.hover-related,
+    #viewport.has-hover-focus [data-edge].hover-related .edge { opacity: 1; }
     .edge.highlighted, .edge.hovered { stroke: var(--accent); stroke-width: 2.7; opacity: 1; filter: drop-shadow(0 0 4px color-mix(in srgb, var(--accent) 48%, transparent)); }
     .edge.compensate.highlighted, .edge.compensate.hovered { stroke: var(--danger); }
     .node.endpoint rect, .node.endpoint circle { stroke: color-mix(in srgb, var(--accent) 72%, var(--border)); }
@@ -512,6 +516,31 @@
       if (mode === "swimlane") { const mid = (a.x + b.x) / 2; return `M ${a.x} ${a.y} C ${mid} ${a.y}, ${mid} ${b.y}, ${b.x} ${b.y}`; }
       const dx = b.x - a.x, dy = b.y - a.y, bend = Math.min(42, Math.hypot(dx, dy) * .12); return `M ${a.x} ${a.y} Q ${(a.x + b.x) / 2 - dy / 8} ${(a.y + b.y) / 2 + dx / 8 + bend} ${b.x} ${b.y}`;
     }
+    function clearHoverFocus() {
+      viewport.classList.remove("has-hover-focus");
+      viewport.querySelectorAll(".hover-related, .hovered").forEach(item => item.classList.remove("hover-related", "hovered"));
+    }
+    function applyHoverFocus(graph, type, id) {
+      clearHoverFocus();
+      const relatedNodes = new Set();
+      if (type === "node") {
+        relatedNodes.add(id);
+        graph.edges.forEach(edge => { if (edge.from === id || edge.to === id) { relatedNodes.add(edge.from); relatedNodes.add(edge.to); } });
+      } else {
+        const edge = graph.edges.find(item => item.id === id);
+        if (!edge) return;
+        relatedNodes.add(edge.from);
+        relatedNodes.add(edge.to);
+      }
+      viewport.classList.add("has-hover-focus");
+      viewport.querySelectorAll(".node").forEach(node => node.classList.toggle("hover-related", relatedNodes.has(node.dataset.node)));
+      viewport.querySelectorAll("[data-edge]").forEach(group => {
+        const edge = graph.edges.find(item => item.id === group.dataset.edge);
+        const related = type === "edge" ? group.dataset.edge === id : Boolean(edge && (edge.from === id || edge.to === id));
+        group.classList.toggle("hover-related", related);
+      });
+      if (type === "edge") viewport.querySelector(`[data-edge="${CSS.escape(id)}"]`)?.querySelector(".edge")?.classList.add("hovered");
+    }
     function renderCanvas(graph) {
       const rect = svg.getBoundingClientRect(), width = Math.max(rect.width, 900), height = Math.max(rect.height, 620);
       if (!state.edgeKinds.size) graph.edges.forEach(edge => state.edgeKinds.add(edge.kind));
@@ -555,13 +584,17 @@
       const gridSvg = `<rect class="canvas-grid" x="${state.bounds.minX - gridPadding}" y="${state.bounds.minY - gridPadding}" width="${state.bounds.maxX - state.bounds.minX + gridPadding * 2}" height="${state.bounds.maxY - state.bounds.minY + gridPadding * 2}"></rect>`;
       viewport.innerHTML = gridSvg + laneSvg + edgeSvg + nodeSvg;
       applyTransform();
-      viewport.querySelectorAll("[data-node]").forEach(node => node.addEventListener("click", event => { event.stopPropagation(); state.selected = node.dataset.node; state.selectedEdge = null; renderCanvas(graph); renderInspector(graph); }));
+      viewport.querySelectorAll("[data-node]").forEach(node => {
+        node.addEventListener("mouseenter", () => applyHoverFocus(graph, "node", node.dataset.node));
+        node.addEventListener("mouseleave", clearHoverFocus);
+        node.addEventListener("click", event => { event.stopPropagation(); state.selected = node.dataset.node; state.selectedEdge = null; renderCanvas(graph); renderInspector(graph); });
+      });
       viewport.querySelectorAll("[data-edge]").forEach(group => {
         const visible = group.querySelector(".edge");
-        group.addEventListener("mouseenter", () => { visible.classList.add("hovered"); renderInspector(graph, group.dataset.edge); });
-        group.addEventListener("mouseleave", () => { visible.classList.remove("hovered"); renderInspector(graph); });
-        group.addEventListener("focus", () => { visible.classList.add("hovered"); renderInspector(graph, group.dataset.edge); });
-        group.addEventListener("blur", () => { visible.classList.remove("hovered"); renderInspector(graph); });
+        group.addEventListener("mouseenter", () => { applyHoverFocus(graph, "edge", group.dataset.edge); renderInspector(graph, group.dataset.edge); });
+        group.addEventListener("mouseleave", () => { clearHoverFocus(); renderInspector(graph); });
+        group.addEventListener("focus", () => { applyHoverFocus(graph, "edge", group.dataset.edge); renderInspector(graph, group.dataset.edge); });
+        group.addEventListener("blur", () => { clearHoverFocus(); renderInspector(graph); });
         group.addEventListener("click", event => { event.stopPropagation(); state.selected = null; state.selectedEdge = group.dataset.edge; renderCanvas(graph); renderInspector(graph); });
         group.addEventListener("keydown", event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); state.selected = null; state.selectedEdge = group.dataset.edge; renderCanvas(graph); renderInspector(graph); } });
       });
