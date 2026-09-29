@@ -112,6 +112,16 @@
     .button:active, .chip:active { transform: translateY(1px); }
     .button.active, .chip.active { background: var(--accent-soft); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 48%, var(--border)); }
     .button:disabled { opacity: .42; cursor: not-allowed; }
+    button[data-edge-kind] { --chip-edge: var(--accent); display: inline-flex; align-items: center; gap: 5px; color: var(--chip-edge); border-color: color-mix(in srgb, var(--chip-edge) 44%, var(--border)); }
+    button[data-edge-kind]::before { content: ""; width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%; background: var(--chip-edge); box-shadow: 0 0 6px color-mix(in srgb, var(--chip-edge) 58%, transparent); }
+    button[data-edge-kind]:hover, button[data-edge-kind].active { background: color-mix(in srgb, var(--chip-edge) 16%, transparent); color: var(--chip-edge); border-color: color-mix(in srgb, var(--chip-edge) 68%, var(--border)); }
+    button[data-edge-kind="sync"], button[data-edge-kind="depends-on"] { --chip-edge: var(--edge-sync); }
+    button[data-edge-kind="write"] { --chip-edge: var(--edge-write); }
+    button[data-edge-kind="read"] { --chip-edge: var(--edge-read); }
+    button[data-edge-kind="async"] { --chip-edge: var(--edge-async); }
+    button[data-edge-kind="schedule"] { --chip-edge: var(--edge-schedule); }
+    button[data-edge-kind="compensate"] { --chip-edge: var(--edge-compensate); }
+    button[data-edge-kind="transition"] { --chip-edge: var(--edge-transition); }
     .shell { display: grid; grid-template-columns: 286px minmax(0, 1fr) 400px; min-height: 0; }
     .sidebar, .inspector { min-height: 0; overflow: auto; background: color-mix(in srgb, var(--panel) 96%, transparent); }
     .sidebar { padding: 16px 12px; border-right: 1px solid var(--border); }
