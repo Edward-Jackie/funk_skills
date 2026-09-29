@@ -115,7 +115,7 @@ CODEMAP 是带证据的导航缓存，不替代源码、测试、运行环境或
 - ViewSpec 只允许引用 Graph/Overlay ID、语义类型、布局模式、焦点、边类型过滤和质量上限；禁止复制节点、边、规则、refs 或坐标。
 - 语义视图按 `architecture / workflow / sequence / dataflow / lifecycle` 选择；当前 Explorer 先落地 `relation / swimlane`，其他类型只能标为目标投影，不得伪装成已经支持的渲染器。
 - Archify 适配器属于可替换的派生渲染层；它可以消费临时 IR，但不能成为 Codemap 的事实存储或 MCP 的第二份状态。
-- Explorer 左侧导航由 `domain / kind / level / parent / sub` 自动生成“领域 → 视角 → 总图/分图”，不得手工维护第二套菜单结构。
+- Explorer 左侧导航由 `domain / kind / level / parent / sub` 自动生成“领域 → 视角 → 总图/分图”；允许全局 summary → 领域 summary → detail 多级下钻，不得手工维护第二套菜单结构。
 - 节点数量不受单屏限制；summary/detail 上限约束的是业务粒度，不是画布容量。关系图和泳道图分别使用自适应间距，默认舒适视图，完整缩放由用户主动触发。
 - 误导入口只记录确认走过的弯路；未知内容写盲区，不用猜测补齐。
 - 当前事实直接更新到所属位置；历史变化交给 Git。人工事故结论和业务铁律放进保护块。

@@ -266,8 +266,8 @@ class Validator:
         if level == "detail":
             if not isinstance(parent, dict) or not isinstance(parent.get("graph"), str) or not isinstance(parent.get("node"), str):
                 self.error(file, "detail Graph 必须声明 parent.graph 和 parent.node")
-        elif parent is not None:
-            self.error(file, "summary Graph 的 parent 必须为 null")
+        elif parent is not None and (not isinstance(parent, dict) or not isinstance(parent.get("graph"), str) or not isinstance(parent.get("node"), str)):
+            self.error(file, "summary Graph 的 parent 必须为 null 或声明 parent.graph 和 parent.node")
 
         status = graph.get("status")
         if status not in STATUSES:
@@ -496,8 +496,6 @@ class Validator:
             if child is None or parent is None:
                 continue
             expected = {"graph": parent.get("id"), "node": parent_node}
-            if child.get("level") != "detail":
-                self.error(child_file, "被 sub 引用的 Graph 必须为 detail")
             if child.get("parent") != expected:
                 self.error(child_file, f"parent 必须为 {expected}")
 

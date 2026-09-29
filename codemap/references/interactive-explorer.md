@@ -44,7 +44,7 @@ scripts/render_web .map/graphs \
 ```
 
 1. `domain` 形成领域根，`kind` 归入业务或服务视角，`level` 显示总图/分图标签。
-2. `parent` 和 summary 节点的 `sub` 建立下钻与返回关系。
+2. `parent` 和节点的 `sub` 建立多级下钻与返回关系；允许全局 summary 进入领域 summary，再进入 detail。
 3. 顶部面包屑显示 `领域 / 视角 / 父图 / 当前图`，需求模式追加 Overlay 标题。
 4. 点击业务链后切换为泳道或状态图；点击节点展示规则、风险、证据、Markdown 章节和源码锚点。
 5. 收拢时保留当前影响范围高亮，帮助用户回到整体。

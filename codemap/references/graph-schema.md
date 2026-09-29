@@ -23,7 +23,7 @@ domain: billing
 summary: 从请求预扣、实际结算、账单落库到日结分佣
 kind: business                 # control | data | business | state | dependency
 level: summary                # summary | detail
-parent: null                  # detail 图填写 { graph: <id>, node: <id> }
+parent: null                  # 顶层 summary 为 null；嵌套 summary/detail 填 { graph: <id>, node: <id> }
 status: current               # current | needs-review | stale | conflict
 verified_at: 2026-09-28
 verified_commit: 0123456789abcdef
@@ -48,7 +48,7 @@ nodes:
     level: 1                   # 逻辑层级，非渲染坐标
     detail: Redis Lua 原子冻结钱包、企业额度与 Key 额度
     tags: [billing, quota, redis]
-    sub: null                 # 或相对当前 YAML 的 detail Graph 路径
+    sub: null                 # 或相对当前 YAML 的子 Graph 路径（领域 summary 或 detail）
     context:
       load: required           # required | optional
       markdown:
@@ -96,12 +96,12 @@ cycles: []                    # 每个实际有向环都必须声明
 - `context.load: required` 表示命中节点时默认加载对应 Markdown 章节；`optional` 只输出引用，由 AI 判断是否继续读取。
 - `context.markdown[].path` 必须是仓库内已存在的相对路径；`heading` 必须是非空章节名。查询器只输出章节引用，不复制整份领域包。
 
-## detail 与 sub
+## 层级与 sub
 
 - `detail` 保存节点或边的必要补充，没内容时写 `null`，不要塞大段说明。
-- `sub` 从 summary 节点指向相对当前文件的 detail YAML。
-- detail Graph 必须声明 `parent.graph` 和 `parent.node`，且与引用它的 summary 节点一致。
-- Summary 用于导航，detail 用于展开局部复杂链；不要靠提高节点上限避免拆分。
+- `sub` 从当前 Graph 的节点指向相对当前文件的子 Graph YAML，可以是领域 summary 或局部 detail。
+- 被 `sub` 引用的子 Graph 必须声明 `parent.graph` 和 `parent.node`，且与引用它的节点一致；顶层 summary 没有父图时才使用 `parent: null`。
+- Summary 用于导航，detail 用于展开局部复杂链；允许“全局 summary → 领域 summary → detail”的多级下钻，不要靠提高节点上限避免拆分。
 
 ## refs
 
