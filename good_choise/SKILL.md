@@ -30,18 +30,29 @@ supplies programmable common sense where ordinary code needs semantic understand
 
 > 本节是本地改造，**是本环境唯一的调用口径**，覆盖下方官方文档给出的默认 transport。协议、问题设计、patterns、cookbooks 照用，只有"打到哪里、叫什么名、哪些参数能传"按本节改写。**硬约束：本 skill 一律只调用阿里云百炼；禁止生成或执行任何指向 `api.typesafe.ai`、`dashscope.aliyuncs.com`、Packy 或其它中转的 curl / SDK / Go 代码，也禁止使用 `jev-*` 模型名。** 概念与方法论可以读 TypeSafe 文档，但落地调用只认百炼。
 
+**环境变量（base_url / model / api_key 的唯一来源）**
+
+| 变量 | 含义 | 示例 |
+| --- | --- | --- |
+| `BAILIAN_BASE_URL` | compatible-mode 根地址（业务空间专属域名，**不含** `/v1/systemone`） | `https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode` |
+| `BAILIAN_DECISION_MODEL` | 决策模型名 | `decision-model-preview` |
+| `BAILIAN_API_KEY` | 该业务空间的 API Key | `sk-…`（仅存本地，绝不出现在代码/仓库/日志） |
+
+- 本机配置位置：`~/.config/bailian.env`（权限 600，不在任何 git 仓），由 `~/.zshrc` 与 `~/.zprofile` source；从终端启动的 Claude Code / Codex / opencode 均自动继承这三个变量。
+- 生成代码时**一律引用变量名**（`$BAILIAN_BASE_URL` / `${BAILIAN_DECISION_MODEL}` / `$BAILIAN_API_KEY`），不得写死真实域名或 key；拿不到变量时先报错提示用户配置，不要回退到任何官方/中转域名。
+- 注意兼容旧名：若只见 `DASHSCOPE_API_KEY` 而无 `BAILIAN_API_KEY`，可临时用 `${BAILIAN_API_KEY:-$DASHSCOPE_API_KEY}`。
+
 **端点（唯一入口，实测有效）**
 
 ```
-POST https://{WorkspaceId}.{region}.maas.aliyuncs.com/compatible-mode/v1/systemone
-region ∈ { cn-beijing, ap-southeast-1 }
+POST ${BAILIAN_BASE_URL}/v1/systemone
 ```
 
-- 必须用**业务空间专属域名**。`dashscope.aliyuncs.com/compatible-mode/v1/systemone` 会返回 **404**（该 path 没挂在通用域名上）；`/v1/chat/completions` 也不行，此模型只支持 `systemone` 一个端点。
+- 必须用**业务空间专属域名**（已含在 `BAILIAN_BASE_URL` 里）。`dashscope.aliyuncs.com/compatible-mode/v1/systemone` 会返回 **404**（该 path 没挂在通用域名上）；`/v1/chat/completions` 也不行，此模型只支持 `systemone` 一个端点。
 - `{WorkspaceId}` 取百炼控制台左上角业务空间 ID，且 API Key 必须属于**同一个业务空间**（跨空间调用报 401/404）。
-- 鉴权：`Authorization: Bearer $DASHSCOPE_API_KEY`。Key 只从环境变量读，**禁止写进源码、配置示例、提交历史或日志**。
+- 鉴权：`Authorization: Bearer $BAILIAN_API_KEY`。Key 只从环境变量读，**禁止写进源码、配置示例、提交历史或日志**。
 
-**模型名**：百炼侧只认 `decision-model-preview`。`jev-latest`、`jev-preview`、`jev-1.13.0` 这些官方别名在百炼无效。响应里的 `model` 字段会回显 `decision-model-preview`，无版本可比对。
+**模型名**：从 `${BAILIAN_DECISION_MODEL}` 读取，当前值为 `decision-model-preview`。`jev-latest`、`jev-preview`、`jev-1.13.0` 这些官方别名在百炼无效。响应里的 `model` 字段会回显 `decision-model-preview`，无版本可比对。
 
 **请求体只有三个字段**：`model`、`state`、`questions`。没有 temperature/top_p/response_format 之类，也不生成文本。
 
@@ -70,11 +81,11 @@ import os
 from typesafe_sdk import TypeSafeClient
 
 client = TypeSafeClient(
-    api_key=os.environ["DASHSCOPE_API_KEY"],
-    base_url="https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode",
+    api_key=os.environ["BAILIAN_API_KEY"],
+    base_url=os.environ["BAILIAN_BASE_URL"],
 )
 result = client.system_one(
-    model="decision-model-preview",
+    model=os.environ["BAILIAN_DECISION_MODEL"],
     state={"content": "Order paid, service still down after 24 hours."},
     questions={"escalate": {"type": "noul", "instructions": "Should we page on-call now?"}},
 )
@@ -84,13 +95,16 @@ print(result.answers)
 **curl 最小可用样例**
 
 ```bash
-curl -sS -X POST "https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/systemone" \
-  -H "Authorization: Bearer $DASHSCOPE_API_KEY" \
+test -n "$BAILIAN_BASE_URL" && test -n "$BAILIAN_API_KEY" || { echo "缺少 BAILIAN_* 环境变量，请先配置 ~/.config/bailian.env"; exit 1; }
+curl -sS -X POST "${BAILIAN_BASE_URL}/v1/systemone" \
+  -H "Authorization: Bearer ${BAILIAN_API_KEY}" \
   -H 'Content-Type: application/json' \
-  -d '{"model":"decision-model-preview","state":{"content":"Order paid, service still down after 24 hours."},"questions":{"escalate":{"type":"noul","instructions":"Should we page on-call now?"}}}'
+  -d @- <<EOF
+{"model":"${BAILIAN_DECISION_MODEL:-decision-model-preview}","state":{"content":"Order paid, service still down after 24 hours."},"questions":{"escalate":{"type":"noul","instructions":"Should we page on-call now?"}}}
+EOF
 ```
 
-**通路唯一性**：本 skill 在本机只经阿里云百炼调用该模型。不要生成任何指向 TypeSafe 官方（`api.typesafe.ai`）、Packy（`cf.api.fan`）或其它中转的代码；上方 SDK 示例里的 `typesafe-sdk` 之所以可用，只是因为把 `base_url` 指到了百炼 compatible-mode，SDK 只是客户端、不代表走官方接口。
+**通路唯一性**：本 skill 在本机只经 `BAILIAN_BASE_URL` 指向的阿里云百炼空间调用该模型。不要生成任何指向 TypeSafe 官方（`api.typesafe.ai`）、Packy（`cf.api.fan`）或其它中转的代码；上方 SDK 示例里的 `typesafe-sdk` 之所以可用，只是因为把 `base_url` 指到了百炼 compatible-mode，SDK 只是客户端、不代表走官方接口。
 
 ## Read the live docs
 
