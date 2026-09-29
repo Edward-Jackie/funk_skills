@@ -22,9 +22,6 @@
       --danger: #ff7c88;
       --blue: #72bfff;
       --purple: #b7a5ff;
-      --edge: #6f8fd0;
-      --edge-write: #55d4f2;
-      --edge-read: #b9a5ff;
       --grid-minor: rgba(122, 151, 210, .12);
       --grid-major: rgba(122, 151, 210, .2);
       --shadow: 0 20px 60px rgba(0, 0, 0, .42);
@@ -49,9 +46,6 @@
       --danger: #c45952;
       --blue: #4f6fa6;
       --purple: #7889a7;
-      --edge: #6f6860;
-      --edge-write: #416fa8;
-      --edge-read: #6c5aa0;
       --grid-minor: rgba(77, 90, 96, .1);
       --grid-major: rgba(77, 90, 96, .17);
       --shadow: 0 20px 60px rgba(52, 58, 54, .12);
@@ -72,9 +66,6 @@
       --danger: #ff6f7f;
       --blue: #8fc2c5;
       --purple: #bda8f0;
-      --edge: #9eb6c7;
-      --edge-write: #69d4da;
-      --edge-read: #bba9ee;
       --grid-minor: rgba(142, 161, 175, .12);
       --grid-major: rgba(142, 161, 175, .2);
       --shadow: 0 20px 60px rgba(8, 16, 24, .45);
@@ -158,16 +149,13 @@
     .grid-major { stroke: var(--grid-major); stroke-width: 1.25; fill: none; }
     .lane-box { fill: color-mix(in srgb, var(--panel) 66%, transparent); stroke: var(--border); stroke-width: 1; }
     .lane-label { fill: var(--muted); font: 600 11px var(--mono); letter-spacing: .05em; }
-    .edge { fill: none; stroke: var(--edge); stroke-width: 2.15; stroke-linecap: round; stroke-linejoin: round; opacity: 1; filter: drop-shadow(0 0 2px color-mix(in srgb, var(--edge) 46%, transparent)); pointer-events: none; transition: opacity .2s var(--ease), stroke .2s var(--ease), stroke-width .2s var(--ease), filter .2s var(--ease); }
+    .edge { fill: none; stroke: var(--accent); stroke-width: 2.15; stroke-linecap: round; stroke-linejoin: round; opacity: 1; filter: drop-shadow(0 0 3px color-mix(in srgb, var(--accent) 54%, transparent)); pointer-events: none; transition: opacity .2s var(--ease), stroke .2s var(--ease), stroke-width .2s var(--ease), filter .2s var(--ease); }
     .edge-hit { fill: none; stroke: transparent; stroke-width: 18; pointer-events: stroke; cursor: pointer; }
     .edge.async, .edge.schedule, .edge.compensate { stroke-dasharray: 5 6; animation: edge-flow 2.8s linear infinite; }
-    .edge.compensate { stroke: var(--danger); }
-    .edge.write { stroke: var(--edge-write); filter: drop-shadow(0 0 3px color-mix(in srgb, var(--edge-write) 54%, transparent)); animation: edge-flow 3.6s linear infinite; }
-    .edge.read { stroke: var(--edge-read); filter: drop-shadow(0 0 3px color-mix(in srgb, var(--edge-read) 52%, transparent)); }
-    .edge.overlay-add { stroke: var(--accent); stroke-width: 2.2; }
-    .edge.overlay-modify { stroke: var(--warning); stroke-width: 2.2; }
-    .edge.overlay-risk { stroke: var(--danger); stroke-width: 2.2; }
-    .edge.overlay-remove { stroke: var(--danger); stroke-dasharray: 5 4; opacity: .46; }
+    .edge.write { stroke: var(--accent); animation: edge-flow 3.6s linear infinite; }
+    .edge.read, .edge.compensate { stroke: var(--accent); }
+    .edge.overlay-add, .edge.overlay-modify, .edge.overlay-risk { stroke: var(--accent); stroke-width: 2.2; }
+    .edge.overlay-remove { stroke: var(--accent); stroke-dasharray: 5 4; opacity: 1; }
     .node { cursor: pointer; transition: opacity .2s var(--ease); }
     .node rect, .node circle { fill: var(--raised); stroke: var(--border); stroke-width: 1.2; transition: fill .2s var(--ease), stroke .2s var(--ease), filter .2s var(--ease); }
     .node:hover rect, .node:hover circle, .node.selected rect, .node.selected circle { fill: var(--hover); stroke: var(--accent); filter: drop-shadow(0 10px 16px rgba(0, 0, 0, .22)); }
@@ -185,7 +173,7 @@
     #viewport.has-hover-focus .node.hover-related,
     #viewport.has-hover-focus [data-edge].hover-related .edge { opacity: 1; }
     .edge.highlighted, .edge.hovered { stroke: var(--accent); stroke-width: 2.7; opacity: 1; filter: drop-shadow(0 0 4px color-mix(in srgb, var(--accent) 48%, transparent)); }
-    .edge.compensate.highlighted, .edge.compensate.hovered { stroke: var(--danger); }
+    .edge.compensate.highlighted, .edge.compensate.hovered { stroke: var(--accent); }
     .node.endpoint rect, .node.endpoint circle { stroke: color-mix(in srgb, var(--accent) 72%, var(--border)); }
     .empty { display: grid; height: 100%; place-items: center; color: var(--muted); font-size: 12px; }
     .eyebrow { color: var(--accent); font: 10px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
@@ -231,8 +219,7 @@
     .status-needs-review, .status-stale { color: var(--warning); }
     .status-conflict { color: var(--danger); }
     @keyframes edge-flow { to { stroke-dashoffset: -22; } }
-    @keyframes edge-alert { 50% { opacity: .46; } }
-    .edge.compensate { animation: edge-flow 2.2s linear infinite, edge-alert 1.8s ease-in-out infinite; }
+    .edge.compensate { animation: edge-flow 2.2s linear infinite; }
     [data-motion="off"] .edge,
     [data-motion="off"] .edge.compensate { animation: none; }
     @media (max-width: 1120px) { .shell { grid-template-columns: 250px minmax(0, 1fr) 350px; } }
