@@ -181,15 +181,23 @@
     .lane-box { fill: color-mix(in srgb, var(--panel) 66%, transparent); stroke: var(--border); stroke-width: 1; }
     .lane-label { fill: var(--muted); font: 600 11px var(--mono); letter-spacing: .05em; }
     .edge { fill: none; stroke: var(--edge-sync); stroke-width: 2.15; stroke-linecap: round; stroke-linejoin: round; opacity: 1; filter: drop-shadow(0 0 3px color-mix(in srgb, var(--edge-sync) 54%, transparent)); pointer-events: none; transition: opacity .2s var(--ease), stroke .2s var(--ease), stroke-width .2s var(--ease), filter .2s var(--ease); }
+    .edge-trace { fill: none; stroke: var(--edge-sync); stroke-width: 3.2; stroke-linecap: round; stroke-dasharray: 1 12; opacity: .9; pointer-events: none; animation: edge-trace-flow 3.8s linear infinite; filter: drop-shadow(0 0 4px color-mix(in srgb, var(--edge-sync) 70%, transparent)); }
     .edge-hit { fill: none; stroke: transparent; stroke-width: 18; pointer-events: stroke; cursor: pointer; }
     .edge.async, .edge.schedule, .edge.compensate { stroke-dasharray: 5 6; animation: edge-flow 2.8s linear infinite; }
     .edge.sync, .edge.depends-on { stroke: var(--edge-sync); filter: drop-shadow(0 0 3px color-mix(in srgb, var(--edge-sync) 54%, transparent)); }
+    .edge-trace.sync, .edge-trace.depends-on { stroke: var(--edge-sync); filter: drop-shadow(0 0 4px color-mix(in srgb, var(--edge-sync) 70%, transparent)); }
     .edge.write { stroke: var(--edge-write); filter: drop-shadow(0 0 3px color-mix(in srgb, var(--edge-write) 54%, transparent)); animation: edge-flow 3.6s linear infinite; }
+    .edge-trace.write { stroke: var(--edge-write); filter: drop-shadow(0 0 4px color-mix(in srgb, var(--edge-write) 70%, transparent)); animation-duration: 2.6s; }
     .edge.read { stroke: var(--edge-read); filter: drop-shadow(0 0 3px color-mix(in srgb, var(--edge-read) 54%, transparent)); }
+    .edge-trace.read { stroke: var(--edge-read); filter: drop-shadow(0 0 4px color-mix(in srgb, var(--edge-read) 70%, transparent)); animation-duration: 3.1s; }
     .edge.async { stroke: var(--edge-async); filter: drop-shadow(0 0 3px color-mix(in srgb, var(--edge-async) 54%, transparent)); }
+    .edge-trace.async { stroke: var(--edge-async); filter: drop-shadow(0 0 4px color-mix(in srgb, var(--edge-async) 70%, transparent)); animation-duration: 2.1s; }
     .edge.schedule { stroke: var(--edge-schedule); filter: drop-shadow(0 0 3px color-mix(in srgb, var(--edge-schedule) 54%, transparent)); }
+    .edge-trace.schedule { stroke: var(--edge-schedule); filter: drop-shadow(0 0 4px color-mix(in srgb, var(--edge-schedule) 70%, transparent)); animation-duration: 2.8s; }
     .edge.compensate { stroke: var(--edge-compensate); filter: drop-shadow(0 0 3px color-mix(in srgb, var(--edge-compensate) 54%, transparent)); }
+    .edge-trace.compensate { stroke: var(--edge-compensate); filter: drop-shadow(0 0 4px color-mix(in srgb, var(--edge-compensate) 70%, transparent)); animation-duration: 1.9s; }
     .edge.transition { stroke: var(--edge-transition); filter: drop-shadow(0 0 3px color-mix(in srgb, var(--edge-transition) 54%, transparent)); }
+    .edge-trace.transition { stroke: var(--edge-transition); filter: drop-shadow(0 0 4px color-mix(in srgb, var(--edge-transition) 70%, transparent)); animation-duration: 3.4s; }
     .edge.overlay-add, .edge.overlay-modify, .edge.overlay-risk { stroke: var(--accent); stroke-width: 2.2; }
     .edge.overlay-remove { stroke: var(--accent); stroke-dasharray: 5 4; opacity: 1; }
     .node { cursor: pointer; transition: opacity .2s var(--ease); }
@@ -204,11 +212,13 @@
     .node.overlay-remove { opacity: .46; }
     .node.overlay-remove rect, .node.overlay-remove circle { stroke: var(--danger); stroke-dasharray: 5 4; }
     .node.context-only, .edge.context-only { opacity: .34; }
-    .node.dimmed, .edge.dimmed { opacity: .1; }
+    .node.dimmed, .edge.dimmed, .edge-trace.dimmed { opacity: .1; }
     #viewport.has-hover-focus .node:not(.hover-related) { opacity: .14; }
-    #viewport.has-hover-focus [data-edge]:not(.hover-related) .edge { opacity: .12; }
+    #viewport.has-hover-focus [data-edge]:not(.hover-related) .edge,
+    #viewport.has-hover-focus [data-edge]:not(.hover-related) .edge-trace { opacity: .1; }
     #viewport.has-hover-focus .node.hover-related,
     #viewport.has-hover-focus [data-edge].hover-related .edge { opacity: 1; }
+    #viewport.has-hover-focus [data-edge].hover-related .edge-trace { opacity: .9; }
     .edge.highlighted, .edge.hovered { stroke: var(--accent); stroke-width: 2.7; opacity: 1; filter: drop-shadow(0 0 4px color-mix(in srgb, var(--accent) 48%, transparent)); }
     .edge.compensate.highlighted, .edge.compensate.hovered { stroke: var(--edge-compensate); }
     .node.endpoint rect, .node.endpoint circle { stroke: color-mix(in srgb, var(--accent) 72%, var(--border)); }
@@ -256,9 +266,11 @@
     .status-needs-review, .status-stale { color: var(--warning); }
     .status-conflict { color: var(--danger); }
     @keyframes edge-flow { to { stroke-dashoffset: -22; } }
+    @keyframes edge-trace-flow { to { stroke-dashoffset: -26; } }
     .edge.compensate { animation: edge-flow 2.2s linear infinite; }
     [data-motion="off"] .edge,
-    [data-motion="off"] .edge.compensate { animation: none; }
+    [data-motion="off"] .edge.compensate,
+    [data-motion="off"] .edge-trace { animation: none; }
     @media (max-width: 1120px) { .shell { grid-template-columns: 250px minmax(0, 1fr) 350px; } }
     @media (max-width: 820px) { .shell { grid-template-columns: 180px minmax(0, 1fr); } .inspector { display: none; } .summary-card { display: none; } }
     @media (max-width: 600px) { .shell { grid-template-columns: minmax(0, 1fr); } .sidebar { display: none; } .brand p { display: none; } .filters { display: none; } }
@@ -592,7 +604,8 @@
         const path = pathFor(a, b, state.mode);
         const hint = edge.label || (edge.condition !== "always" ? edge.condition : EDGE_NAMES[edge.kind] || edge.kind);
         const overlayClass = edge._overlay ? `overlay-${edge._overlay}` : "";
-        return `<g data-edge="${esc(edge.id)}" tabindex="0" role="button" aria-label="${esc(hint)}"><path class="edge ${esc(edge.kind)} ${overlayClass} ${edge._contextOnly ? "context-only" : ""} ${highlighted ? "highlighted" : ""} ${dimmed ? "dimmed" : ""}" d="${path}" marker-end="url(#arrow)"><title>${esc(hint)}</title></path><path class="edge-hit" d="${path}"></path></g>`;
+        const edgeState = `${esc(edge.kind)} ${overlayClass} ${edge._contextOnly ? "context-only" : ""} ${highlighted ? "highlighted" : ""} ${dimmed ? "dimmed" : ""}`;
+        return `<g data-edge="${esc(edge.id)}" tabindex="0" role="button" aria-label="${esc(hint)}"><path class="edge-trace ${edgeState}" d="${path}"></path><path class="edge ${edgeState}" d="${path}" marker-end="url(#arrow)"><title>${esc(hint)}</title></path><path class="edge-hit" d="${path}"></path></g>`;
       }).join("");
       const nodeSvg = layout.nodes.map(node => {
         const text = [node.label, node.detail, ...(node.tags || [])].join(" ").toLowerCase();
