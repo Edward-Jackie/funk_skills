@@ -22,6 +22,13 @@
       --danger: #ff7c88;
       --blue: #72bfff;
       --purple: #b7a5ff;
+      --edge-sync: #6f8fd0;
+      --edge-write: #55d4f2;
+      --edge-read: #b9a5ff;
+      --edge-async: #ffbd57;
+      --edge-schedule: #ff9f67;
+      --edge-compensate: #ff7c88;
+      --edge-transition: #d7ff63;
       --grid-minor: rgba(122, 151, 210, .12);
       --grid-major: rgba(122, 151, 210, .2);
       --shadow: 0 20px 60px rgba(0, 0, 0, .42);
@@ -46,6 +53,13 @@
       --danger: #c45952;
       --blue: #4f6fa6;
       --purple: #7889a7;
+      --edge-sync: #416fa8;
+      --edge-write: #2e8a9a;
+      --edge-read: #6c5aa0;
+      --edge-async: #b06a16;
+      --edge-schedule: #b25d3c;
+      --edge-compensate: #b64545;
+      --edge-transition: #bd4f36;
       --grid-minor: rgba(77, 90, 96, .1);
       --grid-major: rgba(77, 90, 96, .17);
       --shadow: 0 20px 60px rgba(52, 58, 54, .12);
@@ -66,6 +80,13 @@
       --danger: #ff6f7f;
       --blue: #8fc2c5;
       --purple: #bda8f0;
+      --edge-sync: #89acd0;
+      --edge-write: #69d4da;
+      --edge-read: #bba9ee;
+      --edge-async: #ffcf6e;
+      --edge-schedule: #ff9d76;
+      --edge-compensate: #ff7f8f;
+      --edge-transition: #ffbd57;
       --grid-minor: rgba(142, 161, 175, .12);
       --grid-major: rgba(142, 161, 175, .2);
       --shadow: 0 20px 60px rgba(8, 16, 24, .45);
@@ -149,11 +170,16 @@
     .grid-major { stroke: var(--grid-major); stroke-width: 1.25; fill: none; }
     .lane-box { fill: color-mix(in srgb, var(--panel) 66%, transparent); stroke: var(--border); stroke-width: 1; }
     .lane-label { fill: var(--muted); font: 600 11px var(--mono); letter-spacing: .05em; }
-    .edge { fill: none; stroke: var(--accent); stroke-width: 2.15; stroke-linecap: round; stroke-linejoin: round; opacity: 1; filter: drop-shadow(0 0 3px color-mix(in srgb, var(--accent) 54%, transparent)); pointer-events: none; transition: opacity .2s var(--ease), stroke .2s var(--ease), stroke-width .2s var(--ease), filter .2s var(--ease); }
+    .edge { fill: none; stroke: var(--edge-sync); stroke-width: 2.15; stroke-linecap: round; stroke-linejoin: round; opacity: 1; filter: drop-shadow(0 0 3px color-mix(in srgb, var(--edge-sync) 54%, transparent)); pointer-events: none; transition: opacity .2s var(--ease), stroke .2s var(--ease), stroke-width .2s var(--ease), filter .2s var(--ease); }
     .edge-hit { fill: none; stroke: transparent; stroke-width: 18; pointer-events: stroke; cursor: pointer; }
     .edge.async, .edge.schedule, .edge.compensate { stroke-dasharray: 5 6; animation: edge-flow 2.8s linear infinite; }
-    .edge.write { stroke: var(--accent); animation: edge-flow 3.6s linear infinite; }
-    .edge.read, .edge.compensate { stroke: var(--accent); }
+    .edge.sync, .edge.depends-on { stroke: var(--edge-sync); filter: drop-shadow(0 0 3px color-mix(in srgb, var(--edge-sync) 54%, transparent)); }
+    .edge.write { stroke: var(--edge-write); filter: drop-shadow(0 0 3px color-mix(in srgb, var(--edge-write) 54%, transparent)); animation: edge-flow 3.6s linear infinite; }
+    .edge.read { stroke: var(--edge-read); filter: drop-shadow(0 0 3px color-mix(in srgb, var(--edge-read) 54%, transparent)); }
+    .edge.async { stroke: var(--edge-async); filter: drop-shadow(0 0 3px color-mix(in srgb, var(--edge-async) 54%, transparent)); }
+    .edge.schedule { stroke: var(--edge-schedule); filter: drop-shadow(0 0 3px color-mix(in srgb, var(--edge-schedule) 54%, transparent)); }
+    .edge.compensate { stroke: var(--edge-compensate); filter: drop-shadow(0 0 3px color-mix(in srgb, var(--edge-compensate) 54%, transparent)); }
+    .edge.transition { stroke: var(--edge-transition); filter: drop-shadow(0 0 3px color-mix(in srgb, var(--edge-transition) 54%, transparent)); }
     .edge.overlay-add, .edge.overlay-modify, .edge.overlay-risk { stroke: var(--accent); stroke-width: 2.2; }
     .edge.overlay-remove { stroke: var(--accent); stroke-dasharray: 5 4; opacity: 1; }
     .node { cursor: pointer; transition: opacity .2s var(--ease); }
@@ -174,7 +200,7 @@
     #viewport.has-hover-focus .node.hover-related,
     #viewport.has-hover-focus [data-edge].hover-related .edge { opacity: 1; }
     .edge.highlighted, .edge.hovered { stroke: var(--accent); stroke-width: 2.7; opacity: 1; filter: drop-shadow(0 0 4px color-mix(in srgb, var(--accent) 48%, transparent)); }
-    .edge.compensate.highlighted, .edge.compensate.hovered { stroke: var(--accent); }
+    .edge.compensate.highlighted, .edge.compensate.hovered { stroke: var(--edge-compensate); }
     .node.endpoint rect, .node.endpoint circle { stroke: color-mix(in srgb, var(--accent) 72%, var(--border)); }
     .empty { display: grid; height: 100%; place-items: center; color: var(--muted); font-size: 12px; }
     .eyebrow { color: var(--accent); font: 10px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
