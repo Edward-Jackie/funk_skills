@@ -1,5 +1,5 @@
 ---
-name: image-to-prompt
+name: image2prompt
 description: |
   把一张参考图逆向拆解成结构化字段，再渲染成各家生图模型的 prompt。
   当用户给出一张图片、要求"反推 prompt""图生 prompt""复刻这张图""提取画风"时使用。
