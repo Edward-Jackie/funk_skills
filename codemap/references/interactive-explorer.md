@@ -1,5 +1,7 @@
 # 交互视图与需求覆盖层
 
+> **3.0 说明**：Explorer 前端与 `render_web` 已退役，下文凡提到 Explorer、`render_web`、`.map/site/` 的渲染部分均不再可用。本文仍有效的是 Overlay 的数据契约和 `query_graph` 上下文查询；Overlay 的三镜头渲染尚未在 Archify 渲染链路里实现（见 [Archify 集成](archify-integration.md)）。可下钻、可检索的视图改用 `scripts/build_views`。
+
 Codemap 的 Markdown 和 Graph 保存事实，Web Explorer 只负责展示。任何视觉布局、筛选结果和临时需求图都不得反向改写基础事实。
 
 ## 视图选择

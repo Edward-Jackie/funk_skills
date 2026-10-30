@@ -1,5 +1,7 @@
 # 类型化视图编译契约
 
+> **3.0 说明**：渲染器已换成内置的 Archify 分支，`render_web` 与 Explorer 退役。ViewSpec 的字段约束和「事实不进渲染层」的原则继续有效，但目前尚未实现 `.view.yaml` 的读取：视图由 `scripts/build_views` 直接按 Graph 的 `layout.default` 编译。编译映射、事实侧车和下钻协议见 [Archify 集成](archify-integration.md)。
+
 Codemap 的 Graph 是业务事实，ViewSpec 是可重建的阅读请求，渲染 HTML 是临时产物。三者不能混成一层：
 
 ```text
