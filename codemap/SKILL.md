@@ -1,140 +1,108 @@
 ---
 name: codemap
-version: "2.1"
+version: "3.0"
 description: >
-  生成、读取和维护跨 AI 共用的 CODEMAP：把开发任务、故障现象与代码锚点关联起来，并从同一份结构化 Graph 生成 Mermaid、本地交互式知识图谱、业务泳道、需求影响图、Git Diff 反查和按需上下文。用户要求梳理代码结构、调用链、改动入口、业务规则、影响范围或可视化时使用；已有地图且在陌生模块反复搜索、做跨域影响分析或高风险改动时按需读取。不要为普通 CRUD 或一次搜索即可定位的局部改动建图。
+  生成、读取和维护跨 AI 共用的 CODEMAP：把开发任务、故障现象与代码锚点关联起来，并从同一份结构化 Graph 编译成 Archify 质量的可下钻业务图（泳道、分层、跨图检索、侧栏展示条件/证据/源码锚点）、Git Diff 反查和按需 AI 上下文。用户要求梳理代码结构、调用链、改动入口、业务规则、影响范围或可视化时使用；已有地图且在陌生模块反复搜索、做跨域影响分析或高风险改动时按需读取。不要为普通 CRUD 或一次搜索即可定位的局部改动建图。
 ---
 
-# Codemap
+# Codemap 3.0
 
-> 当前版本：**Codemap 2.1**（设计与工具基线）
+CODEMAP 是带证据的导航缓存，不替代源码、测试、运行环境或人工确认的业务要求。让下一次冷启动能在两步内从任务或故障现象走到首个可靠代码锚点，并在高风险业务中看见不能破坏的规则。
 
-2.1 固化了“事实持久化、视图动态生成、AI 按需加载、需求 Overlay 隔离、证据可追溯”的核心契约，并纳入 Graph v2、角色入口视角、Explorer 多层下钻、`query_graph` 和 `impact_diff`。链路追踪、小地图和语义缩放属于 2.1 已确认的增强方向；在对应工具完成前，不得把设计方案标记为已实现能力。
+3.0 的结构：**Codemap 管事实，Archify 管呈现**。`.map/` 的 Markdown 与 Graph 保存可复核的事实；图是由 Graph 单向编译出的派生产物，渲染器是内置的 Archify 分支（`renderers/archify/`，Apache-2.0，改动见 [Archify 集成](references/archify-integration.md)）。原 Explorer 前端已退役。
 
-让下一次冷启动能在两步内从任务或故障现象走到首个可靠代码锚点，并在高风险业务中看见不能破坏的规则。
+核心原则：**持久化事实，动态生成视图**。HTML 不手改，Graph 不存坐标，视图不反向成为第二套真相。
 
-CODEMAP 是带证据的导航缓存，不替代源码、测试、运行环境或人工确认的业务要求。
-
-核心原则是：**持久化事实，动态生成视图**。Markdown 与 Graph 保存可复核的业务事实；Mermaid、Web、单需求影响图和 AI 上下文包都是派生视图，不得反向成为第二套真相。
-
-首次建设或改版前先读取 [改造方向与分层契约](references/product-direction.md)，先确定每层职责，再生成地图文件。
-
-视图改造还要读取 [类型化视图编译契约](references/view-compiler.md)：ViewSpec 只描述阅读请求，Archify 或其他渲染器只接收派生 IR，不得把坐标、排版和渲染字段写回 Graph。
+首次建设或改版前先读 [改造方向与分层契约](references/product-direction.md)；改渲染链路先读 [Archify 集成](references/archify-integration.md)。
 
 ## 使用边界
 
-- 已有地图时，只在缺少上下文、跨域分析或高风险改动时读取 L1，再按路由加载最小 L2；不要把全量地图作为每次任务的前置仪式。
-- 只有用户明确要求建图/更新，或当前任务实际改变了地图已记录的行为时才写地图；普通编码任务不顺手生成文档。
+- 已有地图时，只在缺少上下文、跨域分析或高风险改动时读取 L1，再按路由加载最小 L2；不要把全量地图当前置仪式。
+- 只有用户明确要求建图/更新，或当前任务实际改变了地图已记录的行为时才写地图。
 - 不记录目录树、完整接口清单、机械的 Controller 到 Service 罗列、无状态 CRUD，或一次源码搜索即可恢复的事实。
-- 地图不能成为任务阻塞项。状态不是 `current` 时，把它当线索并回到源码核对。
+- 地图不是阻塞项。状态不是 `current` 时当线索，回源码核对。
 
 ## 两种模式
 
-### 导航模式（默认）
-
-回答“改哪里、调用怎么走、这个现象先查哪”。记录任务路由、模块职责、入口锚点、症状定位、显式控制/数据流和确认踩过的误导入口。
-
-创建或大改导航结构时读取 [导航地图模板](references/navigation-template.md)。
-
-### 高风险业务模式（按需增强）
-
-当任务涉及资金、权限、库存、额度、订单、风控、对外状态、复杂状态机，或多存储/第三方副作用时，在导航内容上追加：业务成功定义、状态真相、不变量、事务/并发、幂等、重试、补偿、人工兜底和验证边界。
-
-创建或大改高风险领域包时读取 [高风险业务模板](references/business-chain-template.md)。不要让普通领域承担这套成本。
+- **导航模式（默认）**：回答「改哪里、调用怎么走、这个现象先查哪」。创建或大改结构时读 [导航地图模板](references/navigation-template.md)。
+- **高风险业务模式（按需）**：涉及资金、权限、库存、额度、订单、风控、复杂状态机或多存储/第三方副作用时，追加业务成功定义、状态真相、不变量、幂等、补偿、人工兜底。读 [高风险业务模板](references/business-chain-template.md)。
 
 ## 权威与证据
 
-地图必须区分：
+- **规范性事实**：只有 `[RULE][human-confirmed]` 是人工确认的业务要求。
+- **描述性事实**：`IMPL`、`VERIFY`、`RISK` 描述当前实现、验证结果和缺口。
+- **冲突**：规则和实现不能同时成立时写 `[CONFLICT][conflict]`，保留两边证据，不自行裁决。
 
-- **规范性事实**：只有 `[RULE][human-confirmed]` 可作为人工确认的业务要求。
-- **描述性事实**：`IMPL`、`VERIFY`、`RISK` 描述当前实现、验证结果和缺口；源码、测试、运行环境分别决定各自事实。
-- **冲突**：规则和实现不能同时成立时写 `[CONFLICT][conflict]`，同时保留两边证据，不得自行裁决。
-
-写任何关键结论前读取 [事实、证据与新鲜度规范](references/evidence-model.md)。
+写关键结论前读 [事实、证据与新鲜度规范](references/evidence-model.md)。
 
 ## 统一产物
 
 ```text
-.map/CODEMAP.md                 # L1：任务路由、领域摘要、症状定位、全局规则/冲突
-.map/CODEMAP-<domain>.md        # L2：领域导航；高风险领域可追加业务链
-.map/graphs/<flow>.yaml         # v2 结构化关系层，供检索和派生视图使用
-.map/views/<flow>.mmd           # 由 Graph 单向生成的 Mermaid 视图
-.map/views/<flow>.view.yaml     # 可选的 ViewSpec，只声明语义视角和阅读镜头
-.map/overlays/<task>.yaml       # 单需求影响覆盖层，默认不并入基础 Graph
-.map/site/index.html            # 由 Graph 单向生成的本地交互视图
-.map/context/<task>.md          # 按需求生成的临时 AI 上下文包
+.map/CODEMAP.md                  # L1：任务路由、领域摘要、症状定位、全局规则/冲突
+.map/CODEMAP-<domain>.md         # L2：领域导航；高风险领域可追加业务链
+.map/graphs/<flow>.yaml          # Graph v2：关系层的唯一结构化事实源
+.map/views/index.html            # 下钻外壳：导航树、面包屑、跨图检索
+.map/views/<flow>.html           # 每张图的 Archify 页面（单独过校验）
+.map/views/<flow>.candidate.json # 编译出的 Archify 候选（派生）
+.map/views/<flow>.facts.json     # 事实侧车（派生）：condition、证据、锚点、下钻、规则
+.map/overlays/<task>.yaml        # 单需求影响覆盖层，默认不并入基础 Graph
+.map/context/<task>.md           # 按需求生成的临时 AI 上下文包
 ```
 
-- L1 和 L2 必须扁平同级；Graph 和生成视图分别放入固定子目录。名称只用小写英文、数字和连字符。
-- L1 目标不超过 120 行，L2 目标不超过 240 行。
-- `AGENTS.md`、`CLAUDE.md`、`GEMINI.md`、Cursor/Windsurf 规则等只引用同一份 `.map/CODEMAP.md`，不复制正文。
-- 若发现 `.claude/` 或 `.codex/` 中的旧 `CODEMAP*`，先读取 [迁移规范](references/migration.md)，不得留下两套 Codemap 事实源。
-- 基础 Graph 只保存已存在或已确认的事实。尚未实施的需求写入 Overlay，并明确标记 `proposal/unverified`；完成源码和验证后才能提升进基础 Graph。
-
-## 两条开发导航路径
-
-- **正向定位**：任务或故障现象 → `query_graph` → 相关子图 → required Markdown → 源码锚点。
-- **反向核查**：Git Diff → `impact_diff` → 直接命中节点/边 → 下游影响 → 未覆盖文件与验证边界。
-
-两条路径只缩小调查范围，不替代源码和测试。涉及高风险逻辑时，即使地图命中也要回到实现核对；Diff 未命中必须明确报告，不能解释为“没有业务影响”。
-
-## 改版与重建
-
-- 先冻结当前技能中的职责、Markdown 模板、Graph Schema、Overlay 和视图规则，再生成项目地图；不得让旧地图反过来限制新定义。
-- 新版只接受 `codemap.graph/v2`。旧 Graph 不兼容、不自动迁移，也不混入新版 Explorer 或查询结果。
-- 重建以源码、测试、运行证据和人工确认规则为输入；旧 Codemap 只可作为待核对线索，禁止机械复制节点、边和结论。
-- 改版验收先输出到隔离目录 `.map/next/`，工具只读取该目录下的新版 Graph；完整验证后再由用户决定是否替换正式地图。不得自动删除或覆盖旧地图。
-- `CODEMAP*.md` 面向 AI，优先表达任务路由、边界、不变量、风险和证据；Graph 只承载关系与视图所需语义，避免复制长篇业务说明。
+- L1/L2 扁平同级；名称只用小写英文、数字和连字符。L1 目标不超过 120 行，L2 不超过 240 行。
+- `AGENTS.md`、`CLAUDE.md` 等入口只引用同一份 `.map/CODEMAP.md`，不复制正文。
+- 旧 `.claude/` 或 `.codex/` 里的 `CODEMAP*` 先读 [迁移规范](references/migration.md)，不得留下两套事实源。
+- 基础 Graph 只保存已存在或已确认的事实；未实施需求写入 Overlay，标 `proposal/unverified`。
 
 ## 工作流
 
-1. **读项目约束**：读取适用的 `AGENTS.md`、`CLAUDE.md` 等入口，确认已有文档和编辑边界。正式地图统一放在项目根目录 `.map/`；改版预览使用 `.map/next/`，不得与旧 Graph 混合读取。
-2. **读取最小上下文**：若地图存在，先读 L1 的路由、`status` 和冲突，再加载命中的最小 L2；找不到路由才探索源码。
-3. **发现真实入口**：从路由、命令、事件、任务、状态写入和测试追踪业务模块。跳过生成代码、依赖和迁移产物。
-4. **选择分层**：运行 `scripts/count_sources.sh [项目根]` 取得规模提示。源码超过 50、核心领域/业务链超过 4、L1 预计超过 120 行，或多个高风险领域需要独立维护时拆 L2；文件数不是唯一判断。
-5. **按模式组织内容**：默认使用导航模板；只有命中高风险条件的领域才加载并追加业务模板。
-6. **逐条取证**：锚点使用 `路径 -> 符号/SQL/配置键`，不保存行号。显式调用才进入控制流；隐式钩子、反射、自动注册找不到证据时标 `unverified` 并给出验证路径。
-7. **生成结构化 Graph**：按 [Graph Schema](references/graph-schema.md) 从源码和人工规则重新生成至少一张 summary Graph；不得把旧 Graph 当模板逐字段升级。YAML 是节点、边、泳道、条件和证据的唯一结构化关系源，不手写 Mermaid，也不保存渲染坐标。
-8. **生成静态与交互视图**：运行 `scripts/render_graph <graph.yaml>` 生成 Mermaid；运行 `scripts/render_web .map/graphs --open` 生成并打开本地 Explorer。需要固定阅读镜头时，先写不含节点/边的 ViewSpec，再运行 `scripts/render_web .map/graphs --view .map/views/<name>.view.yaml --open`。Web 同时提供关系图和适用时的业务泳道，CODEMAP Markdown 不复制视图源码。
-9. **按需求生成影响视图**：需求尚未实现时，按 [交互视图与需求覆盖层](references/interactive-explorer.md) 创建 `.map/overlays/<task>.yaml`，再用 `render_web --overlay` 展示新增、修改、风险和删除候选。Overlay 不得伪装成当前实现。
-10. **为 AI 抽取最小上下文**：运行 `scripts/query_graph .map/graphs --query '<需求>' --depth 2`。优先加载命中节点的 Markdown 章节、规则、风险和源码锚点；`stale/needs-review/conflict/unverified` 只作线索并回到源码核对。
-11. **开发后反查影响**：代码发生变化后运行 `scripts/impact_diff .map/graphs`；需要与分支基线比较时传入 `--base <rev>`。按 [代码改动影响分析](references/change-impact.md) 核对直接命中、下游影响和未覆盖文件，再决定是否更新基础 Graph 或需求 Overlay。
-12. **增量写入与接入**：保留所有 `<!-- manual: keep -->` 块，只改变化的事实。Git 已提供恢复能力，不创建 `.bak`，不维护重复 changelog。仅向已存在且适用的 AI 入口追加按需读取规则。
-13. **确定性校验**：同时校验导航文档、Graph 和使用中的 ViewSpec：
+1. **读项目约束**：读适用的 `AGENTS.md`、`CLAUDE.md`，确认编辑边界。改版预览输出到 `.map/next/`，不与旧 Graph 混读，验证后由用户决定替换。
+2. **读最小上下文**：地图存在时先读 L1 的路由、`status`、冲突，再加载命中的最小 L2。
+3. **发现真实入口**：从路由、命令、事件、任务、状态写入和测试追踪业务模块，跳过生成代码和依赖。
+4. **选择分层**：`scripts/count_sources.sh [项目根]` 取规模提示；源码超过 50、核心领域超过 4、L1 预计超过 120 行时拆 L2。
+5. **逐条取证**：锚点用 `路径 -> 符号/SQL/配置键`，不存行号；找不到证据的隐式钩子标 `unverified`。
+6. **生成 Graph**：按 [Graph Schema](references/graph-schema.md) 从源码和人工规则重新生成，YAML 是节点、边、泳道、条件、证据的唯一结构化源。Summary 最多 12 个节点，detail 最多 18 个；超过就用节点 `sub` 拆 detail 图。
+7. **生成视图并校验事实层**：`check_graph` 要求每张 Graph 的 `view` 指向最新的 `.mmd`，所以新写的 Graph 必须先有 `.mmd`。第 8 步的 `scripts/build_views` 在默认输出到 `.map/views/` 时会先替每张图运行 `render_graph`；单张可手动 `scripts/render_graph .map/graphs/<flow>.yaml`。之后再运行 `scripts/check_graph .map/graphs` 与 `scripts/check_map.sh [--strict] .map/CODEMAP.md`。
+8. **生成可下钻视图**：
 
    ```bash
-   scripts/check_graph .map/graphs
-   scripts/check_map.sh .map/CODEMAP.md
-   scripts/check_map.sh --strict .map/CODEMAP.md
+   scripts/build_views --root <项目根>              # 编译 + 渲染 + 外壳，输出 .map/views/
+   scripts/build_views --root <项目根> --finalize   # 每页走 Archify 完整门禁（含真实浏览器检查）
+   scripts/build_views --root <项目根> --only <graph-id>
    ```
 
-   `render_web --view` 会在写 HTML 前校验 ViewSpec 引用的 Graph、Overlay、焦点节点、边类型和质量上限。`check_map.sh` 会调用 Graph 校验器、收集 YAML refs 并纳入条目级过期检测。普通模式报告结构、链接、锚点、新鲜度和冲突；严格模式将失效锚点、过期、冲突、非 `current`、未纳入 Git 和超限判为失败。
+   每张图独立失败不阻断其余；退出码非零表示有失败。有源码锚点的图会带 `meta.repository`，锚点在固定版本不存在时不进图（仍留在侧车），并给出警告。
+9. **AI 取最小上下文**：`scripts/query_graph .map/graphs --query '<需求>' --depth 2`，优先加载命中节点的 Markdown 章节、规则、风险与锚点。命中带 `sub` 的节点会提示可下钻的子图，分图命中会输出上级链。
+10. **开发后反查影响**：`scripts/impact_diff .map/graphs [--base <rev>]`；Diff 未命中必须明确报告，不能解释为「没有业务影响」。
+11. **增量写入**：保留所有 `<!-- manual: keep -->` 块，只改变化的事实；不创建 `.bak`，历史交给 Git。
+
+## 读图方式（给人）
+
+打开 `.map/views/index.html`：左侧按「总 → 分 → 分」生成导航：分组标题合并为一行「领域 - 视角」（如 `billing - 业务视角`），组内按 `parent` 链逐级嵌套，层数不限；存在多张并列的顶层图时，自动合成「系统总览」作为总入口，各顶层图成为它下面的分；顶部有面包屑和跨图检索（快捷键 `/`，支持中文子串，搜节点名、ID、标签、说明、锚点）。图页面里点节点或边，侧栏出现「Codemap」区：完整说明、标签、证据等级、`path -> symbol` 锚点、边的触发条件；有 `sub` 的节点带「下钻」入口，子图带「上级图」入口。Archify 原有的节点查找、路径探查、可达性、导出等能力全部保留。
+
+## 当前能力边界（未实现的不得宣称已支持）
+
+- **已支持**：`layout.default` 为 `swimlane` / `layered` 的 Graph（编译为 Archify workflow）。`level` 压缩到 6 列，同泳道同列最多堆叠 4 个节点，超出时编译报错并提示拆 detail 图。
+- **未支持**：`state`（生命周期）与 `force` 布局的 Graph 会被跳过并列入汇总；需求 Overlay 的三镜头渲染、力导向发现图、提交钩子自动更新；Graph 的 `rules` 绑定字段已透传到侧车，但 `check_graph` 尚未校验它。
+- **无 Graph 源头的图类型**（erd、class、tree、timeline、waterfall、explainer）：不经 Graph 编译，需要时直接用内置 Archify 按其 SKILL 流程出图，不进下钻外壳。
+- 渲染链路的完整边界与待办见 [Archify 集成](references/archify-integration.md)。
 
 ## 写作约束
 
 - L1 路由必须包含：任务/现象、最小读取集、条件性追加读取集、首个锚点、关键规则、必须验证。
 - L2 必须能脱离 L1 理解；高风险 L2 还必须覆盖状态真相、幂等和失败补偿。
-- Summary Graph 最多 12 个节点，detail Graph 最多 18 个节点；超过就用节点 `sub` 拆出 detail 图。
-- Obsidian 式力导向图只用于发现关联；严格执行顺序使用泳道或分层图，生命周期使用状态图，单需求使用影响覆盖层。不要用一种布局承载所有语义。
-- AI 生成的是 Graph/Overlay/View Query，不生成任意 HTML、CSS 或坐标；布局和交互由 `render_web` 统一实现。
-- ViewSpec 只允许引用 Graph/Overlay ID、语义类型、布局模式、焦点、边类型过滤和质量上限；禁止复制节点、边、规则、refs 或坐标。
-- 语义视图按 `architecture / workflow / sequence / dataflow / lifecycle` 选择；当前 Explorer 先落地 `relation / swimlane`，其他类型只能标为目标投影，不得伪装成已经支持的渲染器。
-- Archify 适配器属于可替换的派生渲染层；它可以消费临时 IR，但不能成为 Codemap 的事实存储或 MCP 的第二份状态。
-- Explorer 左侧导航由 `domain / kind / level / parent / sub` 自动生成“领域 → 视角 → 总图/分图”；允许全局 summary → 领域 summary → detail 多级下钻，不得手工维护第二套菜单结构。
-- 节点数量不受单屏限制；summary/detail 上限约束的是业务粒度，不是画布容量。关系图和泳道图分别使用自适应间距，默认舒适视图，完整缩放由用户主动触发。
-- 误导入口只记录确认走过的弯路；未知内容写盲区，不用猜测补齐。
-- 当前事实直接更新到所属位置；历史变化交给 Git。人工事故结论和业务铁律放进保护块。
+- AI 只产出 Graph / Overlay / 查询，不生成任意 HTML、CSS 或坐标；布局由 Archify 自动路由，呈现提示放编译器映射，不进 Graph。
+- 严格执行顺序用泳道或分层，生命周期用状态图，单需求用 Overlay；不要用一种布局承载所有语义。
+- 误导入口只记录确认走过的弯路；未知内容写盲区，不猜测补齐。
+- 当前事实直接更新到所属位置；人工事故结论和业务铁律放进保护块。
 
 ## 完成条件
 
 - 一个真实任务或故障现象能从 L1 在两步内到达最小 L2 和首个锚点。
 - 高风险领域记录了业务成功、状态真相、不变量、幂等、副作用和失败补偿。
-- Graph 无重复 ID、悬空边、孤立节点、缺失条件、失效 refs 或未声明环，生成视图已被 Markdown 引用。
-- 本地 Explorer 能在全局关系、领域关系和业务泳道之间切换；点击节点可看到关联边、证据与源码锚点，点击或悬停边可在侧栏查看条件与说明。
-- 一个真实需求能生成不污染基础 Graph 的 Overlay，并在“改前 / 只看改动 / 改后带上下文”之间切换；`query_graph` 能输出可审计的最小上下文包。
-- 一组真实 Git 改动能由 `impact_diff` 反查直接命中、有限深度的下游影响和未覆盖文件；结果不夸大为完整影响证明。
-- 固定的业务视角能由 ViewSpec 重建，且渲染器变化不会改变节点/边 ID、证据和业务条件。
-- 结构检查、浏览器检查和人眼视觉复核分别报告，未完成浏览器或人工检查时不得声称视觉质量已验收。
-- 关键结论有事实类型、证据等级和具体来源；未运行的内容没有标成 `runtime-verified`。
-- 规则与实现差异进入冲突台账，没有被静默改写。
-- 校验通过；不能通过的项目被明确交付为风险，而不是伪造 `current`。
+- Graph 无重复 ID、悬空边、孤立节点、缺失条件、失效 refs 或未声明环；生成视图已被 Markdown 引用。
+- `scripts/build_views --finalize` 全部通过，节点与边 ID 在 Graph、候选、侧车、HTML 间一致。
+- 点击节点/边能看到条件、证据与源码锚点；summary 到 detail 能两跳进退，面包屑正确。
+- 结构检查、浏览器检查和人眼视觉复核分别报告，未做的不得声称已验收。
+- 关键结论有事实类型、证据等级和具体来源；规则与实现差异进入冲突台账。
+- 校验不能通过的项目被明确交付为风险，而不是伪造 `current`。

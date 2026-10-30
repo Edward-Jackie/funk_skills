@@ -1,0 +1,323 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["PyYAML>=6.0.2,<7"]
+# ///
+"""把 codemap.graph/v2 编译成 archify 候选 JSON 与事实侧车 JSON。
+
+Graph 只保存语义事实；archify 候选只含绘图字段，语义层（condition、证据、锚点、
+规则、下钻）进入以节点/边 ID 为键的事实侧车，由 viewer 补丁按 ID 读取。
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+import yaml
+
+ID_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]*$")
+MAX_COL = 5  # archify workflow 的列上限
+MAX_STACK = 4  # 同泳道同列最多竖向堆叠的节点数
+STACK_STEP = 90  # 竖向堆叠的间距（archify 文档推荐 -90/0/90）
+SUBLABEL_LIMIT = 26
+SOURCE_LABEL_LIMIT = 48
+SOURCE_MAX = 3
+
+# 节点 kind -> archify 组件类型
+NODE_TYPE = {
+    "entry": "frontend",
+    "process": "backend",
+    "decision": "backend",
+    "state": "database",
+    "store": "database",
+    "external": "external",
+    "terminal": "backend",
+}
+
+# 边 kind -> (archify variant, role)
+EDGE_STYLE = {
+    "sync": ("default", None),
+    "async": ("dashed", "async"),
+    "read": ("default", None),
+    "write": ("default", None),
+    "schedule": ("dashed", "async"),
+    "compensate": ("security", "error"),
+    "depends-on": ("dashed", None),
+    "transition": ("default", None),
+}
+
+# Graph layout.default -> archify 图类型；其余暂不支持
+LAYOUT_TYPE = {"swimlane": "workflow", "layered": "workflow"}
+
+
+HEX40 = re.compile(r"^[a-fA-F0-9]{40}$")
+
+
+def git_out(root: Path, *args: str) -> str:
+    result = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, check=False)
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def path_at_revision(root: Path, revision: str, path: str) -> bool:
+    return subprocess.run(
+        ["git", "-C", str(root), "cat-file", "-e", f"{revision}:{path}"], capture_output=True
+    ).returncode == 0
+
+
+def repository_meta(root: Path, graph: dict) -> dict | None:
+    """读取仓库 origin（去掉凭据）与固定版本；SSH 或非 https 来源用 local-only。
+    Archify 只接受 HTTP(S) 或 Git SSH 地址，没有 origin 或取不到 40 位版本时返回 None，不编造来源。"""
+    origin = re.sub(r"(https?://)[^/@]*@", r"\1", git_out(root, "remote", "get-url", "origin"))
+    if not origin:
+        return None
+    url = origin
+    commit = str(graph.get("verified_commit") or "")
+    revision = commit if HEX40.match(commit) else git_out(root, "rev-parse", "HEAD")
+    if not HEX40.match(revision):
+        return None
+    meta = {"url": url, "revision": revision}
+    if not url.startswith("https://"):
+        meta["link_mode"] = "local-only"
+    return meta
+
+
+class CompileError(Exception):
+    pass
+
+
+def clip(text: str | None, limit: int) -> str:
+    if not text:
+        return ""
+    text = " ".join(str(text).split())
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def check_id(kind: str, value: str) -> str:
+    if not ID_RE.match(str(value)):
+        raise CompileError(f"{kind} ID 不符合 archify 规则（须以字母开头）: {value}")
+    return str(value)
+
+
+def assign_columns(nodes: list[dict]) -> tuple[dict[str, int], dict[str, int]]:
+    """level 是跨泳道的全局顺序：均匀压缩到 0..5 列，同泳道同列的节点按 level 竖向堆叠。"""
+    levels = sorted({int(n.get("level") or 1) for n in nodes})
+    total = len(levels)
+    col_of_level = {
+        lv: (i if total <= MAX_COL + 1 else i * (MAX_COL + 1) // total)
+        for i, lv in enumerate(levels)
+    }
+    cells: dict[tuple[str, int], list[dict]] = {}
+    for n in nodes:
+        col = col_of_level[int(n.get("level") or 1)]
+        cells.setdefault((n["_lane"], col), []).append(n)
+
+    cols: dict[str, int] = {}
+    offsets: dict[str, int] = {}
+    for (_, col), group in cells.items():
+        group.sort(key=lambda x: int(x.get("level") or 1))
+        if len(group) > MAX_STACK:
+            raise CompileError(
+                f"泳道 {group[0]['_lane']} 第 {col} 列堆叠了 {len(group)} 个节点（上限 {MAX_STACK}），请拆分 detail 图"
+            )
+        for i, n in enumerate(group):
+            cols[n["id"]] = col
+            if len(group) > 1:
+                offsets[n["id"]] = int((i - (len(group) - 1) / 2) * STACK_STEP)
+    return cols, offsets
+
+
+def sibling_title(base_dir: Path, graph_id: str) -> str:
+    """读取同目录兄弟 Graph 的标题；找不到时退回 ID，供下钻按钮显示。"""
+    path = base_dir / f"{graph_id}.yaml"
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        return str(data.get("title") or graph_id)
+    except (OSError, AttributeError, yaml.YAMLError):
+        return graph_id
+
+
+def compile_graph(
+    graph: dict, quality: str, repo_root: Path | None, base_dir: Path, sublabel_limit: int = SUBLABEL_LIMIT
+) -> tuple[dict, dict]:
+    layout = graph.get("layout") or {}
+    default = layout.get("default")
+    if default not in LAYOUT_TYPE:
+        raise CompileError(f"暂不支持 layout.default={default}（v2 支持 swimlane / layered）")
+
+    nodes = graph.get("nodes") or []
+    edges = graph.get("edges") or []
+    lanes_decl = layout.get("lanes") or []
+    if lanes_decl:
+        lanes = [
+            {"id": check_id("泳道", l["id"]), "label": str(l["label"])}
+            for l in sorted(lanes_decl, key=lambda x: x.get("order", 0))
+        ]
+    else:
+        lanes = [{"id": "main", "label": str(graph.get("title") or graph["id"])}]
+    for n in nodes:
+        n["_lane"] = n.get("lane") or lanes[0]["id"]
+
+    repo = repository_meta(repo_root, graph) if repo_root else None
+    if repo_root and repo is None:
+        print(f"警告 {graph['id']}: {repo_root} 没有 origin 或取不到版本，源码锚点只进侧车，不进图", file=sys.stderr)
+    cols, offsets = assign_columns(nodes)
+    node_ids = {n["id"] for n in nodes}
+
+    a_nodes, facts_nodes = [], {}
+    for n in nodes:
+        nid = check_id("节点", n["id"])
+        refs = n.get("refs") or []
+        item = {
+            "id": nid,
+            "lane": n["_lane"],
+            "col": cols[nid],
+            "type": NODE_TYPE.get(n.get("kind"), "backend"),
+            "label": str(n["label"]),
+        }
+        if nid in offsets:
+            item["yOffset"] = offsets[nid]
+        sub = clip(n.get("detail"), sublabel_limit) if sublabel_limit > 0 else ""
+        if sub:
+            item["sublabel"] = sub
+        tags = n.get("tags") or []
+        if tags:
+            item["tag"] = str(tags[0])
+        sources = []
+        for r in refs:
+            if repo and not path_at_revision(repo_root, repo["revision"], r["path"]):
+                print(f"警告 {graph['id']}/{nid}: 锚点在固定版本不存在，已不进图（仍保留在侧车）: {r['path']}", file=sys.stderr)
+                continue
+            sources.append({"path": r["path"], **({"label": clip(r.get("symbol"), SOURCE_LABEL_LIMIT)} if r.get("symbol") else {})})
+        sources = sources[:SOURCE_MAX]
+        if sources and repo:
+            item["sources"] = sources
+        a_nodes.append(item)
+        facts_nodes[nid] = {
+            "kind": n.get("kind"),
+            "level": n.get("level"),
+            "detail": n.get("detail"),
+            "tags": tags,
+            "refs": refs,
+            "evidence": n.get("evidence"),
+            "context": n.get("context"),
+            "sub": n.get("sub"),
+            "rules": n.get("rules") or [],
+        }
+
+    a_edges, facts_edges = [], {}
+    for e in edges:
+        eid = check_id("边", e["id"])
+        if e["from"] not in node_ids or e["to"] not in node_ids:
+            raise CompileError(f"边 {eid} 引用了不存在的节点")
+        variant, role = EDGE_STYLE.get(e.get("kind"), ("default", None))
+        label = e.get("label") or ""
+        cond = e.get("condition")
+        if not label and cond and cond != "always":
+            label = clip(cond, 14)
+        item = {"id": eid, "from": e["from"], "to": e["to"], "variant": variant}
+        if label:
+            item["label"] = label
+        if role:
+            item["role"] = role
+        a_edges.append(item)
+        facts_edges[eid] = {
+            "kind": e.get("kind"),
+            "label": e.get("label"),
+            "condition": cond,
+            "detail": e.get("detail"),
+            "refs": e.get("refs") or [],
+            "evidence": e.get("evidence"),
+            "rules": e.get("rules") or [],
+        }
+
+    candidate = {
+        "schema_version": 2,
+        "diagram_type": LAYOUT_TYPE[default],
+        "meta": {
+            "title": str(graph.get("title") or graph["id"]),
+            "subtitle": clip(graph.get("summary"), 80),
+            "output": f"{graph['id']}.html",
+            "quality_profile": quality,
+        },
+        "lanes": lanes,
+        "nodes": a_nodes,
+        "edges": a_edges,
+    }
+    if repo:
+        candidate["meta"]["repository"] = repo
+    titles: dict[str, str] = {}
+    for n in nodes:
+        if n.get("sub"):
+            sid = Path(str(n["sub"])).stem
+            titles[sid] = sibling_title(base_dir, sid)
+    parent = graph.get("parent")
+    if isinstance(parent, dict) and parent.get("graph"):
+        titles[parent["graph"]] = sibling_title(base_dir, parent["graph"])
+    facts = {
+        "schema": "codemap.facts/v1",
+        "titles": titles,
+        "graph": {
+            "id": graph["id"],
+            "title": graph.get("title"),
+            "domain": graph.get("domain"),
+            "summary": graph.get("summary"),
+            "kind": graph.get("kind"),
+            "level": graph.get("level"),
+            "parent": graph.get("parent"),
+            "status": graph.get("status"),
+            "verified_at": str(graph["verified_at"]) if graph.get("verified_at") else None,
+            "verified_commit": graph.get("verified_commit"),
+        },
+        "nodes": facts_nodes,
+        "edges": facts_edges,
+    }
+    return candidate, facts
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("graphs", help="Graph YAML 文件或 .map/graphs 目录")
+    ap.add_argument("--out-dir", required=True, help="候选与侧车的输出目录")
+    ap.add_argument("--repo-root", help="项目仓库根；给出后候选带 meta.repository 与源码锚点，否则锚点只进侧车")
+    ap.add_argument("--quality", default="standard", choices=["standard", "showcase"])
+    ap.add_argument("--sublabel-limit", type=int, default=SUBLABEL_LIMIT, help="节点副标题字数上限，0 表示不写")
+    args = ap.parse_args()
+
+    src = Path(args.graphs)
+    files = sorted(src.glob("*.yaml")) if src.is_dir() else [src]
+    out = Path(args.out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+
+    failed = 0
+    for f in files:
+        graph = yaml.safe_load(f.read_text(encoding="utf-8"))
+        if not isinstance(graph, dict) or graph.get("schema") != "codemap.graph/v2":
+            print(f"跳过 {f.name}: 不是 codemap.graph/v2", file=sys.stderr)
+            continue
+        try:
+            candidate, facts = compile_graph(
+                graph, args.quality, Path(args.repo_root) if args.repo_root else None, f.parent,
+                args.sublabel_limit,
+            )
+        except CompileError as exc:
+            failed += 1
+            print(f"失败 {f.name}: {exc}", file=sys.stderr)
+            continue
+        gid = graph["id"]
+        (out / f"{gid}.candidate.json").write_text(
+            json.dumps(candidate, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        (out / f"{gid}.facts.json").write_text(
+            json.dumps(facts, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        print(f"ok {gid}: {len(candidate['nodes'])} 节点 / {len(candidate['edges'])} 边")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

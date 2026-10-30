@@ -490,6 +490,7 @@ class Validator:
             self.error(file, "Graph status 为 conflict，但没有 conflict 证据")
 
     def validate_sub_links(self) -> None:
+        referenced_by: dict[Path, tuple[Path, str]] = {}
         for parent_file, parent_node, child_file in self.sub_links:
             child = self.data.get(child_file)
             parent = self.data.get(parent_file)
@@ -498,6 +499,26 @@ class Validator:
             expected = {"graph": parent.get("id"), "node": parent_node}
             if child.get("parent") != expected:
                 self.error(child_file, f"parent 必须为 {expected}")
+            first = referenced_by.setdefault(child_file, (parent_file, parent_node))
+            if first != (parent_file, parent_node):
+                self.error(child_file, f"同一子图被多个节点作为 sub 引用：{first[0].name}:{first[1]} 与 {parent_file.name}:{parent_node}")
+
+        # 多级下钻：parent 链不得成环（总分分的层数不限，但必须能走到根）
+        file_by_id = {
+            graph.get("id"): file for file, graph in self.data.items() if isinstance(graph.get("id"), str)
+        }
+        for file, graph in self.data.items():
+            chain = [graph.get("id")]
+            current = graph
+            while isinstance(current.get("parent"), dict):
+                parent_id = current["parent"].get("graph")
+                if parent_id in chain:
+                    self.error(file, f"parent 链成环：{' → '.join(str(item) for item in [*chain, parent_id])}")
+                    break
+                chain.append(parent_id)
+                current = self.data.get(file_by_id.get(parent_id))
+                if current is None:
+                    break
 
 
 def collect_files(path: Path, validator: Validator) -> list[Path]:

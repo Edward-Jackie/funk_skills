@@ -193,6 +193,21 @@ def ref_line(ref: dict[str, Any]) -> str:
     return f"`{ref.get('path')}`" + (f" → `{symbol}`" if symbol else "")
 
 
+def hierarchy_lines(graph: dict[str, Any], by_id: dict[str, dict[str, Any]]) -> list[str]:
+    """分图命中时回溯上级链：改动可能同时影响上级图的对应节点。"""
+    chain: list[str] = []
+    seen = {graph.get("id")}
+    parent = graph.get("parent")
+    while isinstance(parent, dict) and parent.get("graph") in by_id and parent["graph"] not in seen:
+        seen.add(parent["graph"])
+        upper = by_id[parent["graph"]]
+        chain.insert(0, f"{upper.get('title', parent['graph'])}（`{parent['graph']}:{parent.get('node')}`）")
+        parent = upper.get("parent")
+    if not chain:
+        return []
+    return [f"- 层级：{' › '.join(chain)} › 本图", "- 上级图的对应节点也需要一并复核。"]
+
+
 def render_report(
     changes: set[str],
     graphs: list[tuple[Path, dict[str, Any]]],
@@ -200,6 +215,7 @@ def render_report(
     depth: int,
     base: str | None,
 ) -> str:
+    by_id = {g["id"]: g for _, g in graphs if isinstance(g.get("id"), str)}
     lines = ["# Codemap Git Diff 影响分析", ""]
     lines.append(f"> 范围：{f'`{base}...HEAD` 加当前工作区' if base else '当前暂存区、工作区和未跟踪文件'}；下游深度：{depth}")
     lines.extend(["", "## 变更文件", ""])
@@ -235,6 +251,7 @@ def render_report(
                 "",
                 f"- Graph：`{graph.get('id')}`（`{graph.get('status', 'unknown')}`）",
                 f"- 来源：`{source_label}`",
+                *hierarchy_lines(graph, by_id),
                 "",
                 "### 直接命中",
                 "",
@@ -243,7 +260,8 @@ def render_report(
         for node_id in sorted(direct_nodes):
             node = nodes[node_id]
             files = "、".join(f"`{path}`" for path in sorted(direct_nodes[node_id]))
-            lines.append(f"- 节点 **{node.get('label', node_id)}** (`{node_id}`)：{files}")
+            drill = f"；下钻图 `{Path(node['sub']).stem}` 需一并复核" if isinstance(node.get("sub"), str) else ""
+            lines.append(f"- 节点 **{node.get('label', node_id)}** (`{node_id}`)：{files}{drill}")
         edge_by_id = {
             edge.get("id"): edge for edge in graph.get("edges", []) if isinstance(edge, dict)
         }

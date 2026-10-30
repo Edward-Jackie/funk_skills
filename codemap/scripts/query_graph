@@ -281,6 +281,32 @@ def ref_line(ref: dict[str, Any]) -> str:
     return f"`{ref.get('path')}`" + (f" → `{symbol}`" if symbol else "")
 
 
+def sub_targets(graphs: dict[str, dict[str, Any]], sources: dict[str, Path]) -> dict[tuple[str, str], str]:
+    """(Graph, 节点) -> 子 Graph ID；sub 是相对当前 YAML 的路径，按解析后的文件反查 ID。"""
+    by_file = {source.resolve(): graph_id for graph_id, source in sources.items()}
+    result: dict[tuple[str, str], str] = {}
+    for graph_id, graph in graphs.items():
+        for node in graph.get("nodes", []):
+            if isinstance(node, dict) and isinstance(node.get("sub"), str) and isinstance(node.get("id"), str):
+                child = by_file.get((sources[graph_id].parent / node["sub"]).resolve())
+                if child:
+                    result[(graph_id, node["id"])] = child
+    return result
+
+
+def ancestor_titles(graph_id: str, graphs: dict[str, dict[str, Any]]) -> list[str]:
+    """由根到父的标题链（不含自身），沿 parent 向上，遇到环或缺失即停。"""
+    chain: list[str] = []
+    seen = {graph_id}
+    parent = graphs[graph_id].get("parent")
+    while isinstance(parent, dict) and parent.get("graph") in graphs and parent["graph"] not in seen:
+        seen.add(parent["graph"])
+        parent_graph = graphs[parent["graph"]]
+        chain.insert(0, f"{parent_graph.get('title', parent['graph'])}（{parent['graph']}:{parent.get('node')}）")
+        parent = parent_graph.get("parent")
+    return chain
+
+
 def render_context(
     query: str,
     selected: dict[str, set[str]],
@@ -290,6 +316,7 @@ def render_context(
     root: Path,
 ) -> str:
     lines = ["# Codemap 按需上下文", "", f"> 查询：{query}", ""]
+    drill = sub_targets(graphs, sources)
     if not selected:
         lines.extend(["未命中结构化 Graph。请回到 `.map/CODEMAP.md` 路由或源码搜索，不要把未命中解释为业务不存在。", ""])
     context_refs: set[tuple[str, str, str]] = set()
@@ -310,17 +337,23 @@ def render_context(
                 f"- Graph：`{graph_id}`（`{graph.get('status', 'unknown')}`）",
                 f"- 来源：`{source_label}`",
                 f"- 摘要：{graph.get('summary') or '未填写'}",
-                "",
-                "### 命中节点",
-                "",
             ]
         )
+        chain = ancestor_titles(graph_id, graphs)
+        if chain:
+            lines.append(f"- 层级：{' › '.join(chain)} › 本图")
+        lines.extend(["", "### 命中节点", ""])
         nodes = [node for node in graph.get("nodes", []) if isinstance(node, dict) and node.get("id") in node_ids]
         nodes.sort(key=lambda item: (item.get("level", 0), item.get("id", "")))
         for node in nodes:
             evidence = node.get("evidence") if isinstance(node.get("evidence"), dict) else {}
             lines.append(f"- **{node.get('label')}** (`{node.get('id')}`)：{node.get('detail') or '无补充'}")
             lines.append(f"  - 证据：`{evidence.get('level', 'unknown')}`；{evidence.get('note', '无说明')}")
+            child_id = drill.get((graph_id, node.get("id")))
+            if child_id:
+                lines.append(
+                    f"  - 可下钻：`{child_id}`（{graphs[child_id].get('title', child_id)}）；需要更多业务细节时用该 Graph 继续查询"
+                )
             for ref in node.get("refs", []):
                 if isinstance(ref, dict):
                     lines.append(f"  - 锚点：{ref_line(ref)}")

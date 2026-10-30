@@ -101,7 +101,9 @@ cycles: []                    # 每个实际有向环都必须声明
 - `detail` 保存节点或边的必要补充，没内容时写 `null`，不要塞大段说明。
 - `sub` 从当前 Graph 的节点指向相对当前文件的子 Graph YAML，可以是领域 summary 或局部 detail。
 - 被 `sub` 引用的子 Graph 必须声明 `parent.graph` 和 `parent.node`，且与引用它的节点一致；顶层 summary 没有父图时才使用 `parent: null`。
-- Summary 用于导航，detail 用于展开局部复杂链；允许“全局 summary → 领域 summary → detail”的多级下钻，不要靠提高节点上限避免拆分。
+- Summary 用于导航，detail 用于展开局部复杂链；允许“全局 summary → 领域 summary → detail → detail …”的多级下钻（总分分），不要靠提高节点上限避免拆分。
+- 层级深度只由 `parent` 链决定，`level` 只是节点数上限的类型标签：根图是「总」，其下每一级都是「分」，`detail` 下可以继续挂 `detail`，层数不限。
+- 导航外壳按「领域 - 视角」分组（视角由 `kind` 决定：`business` 为业务视角，其余为服务视角）。父子在不同分组时，子图出现在自己的分组里并标注“↑ 父图 › 节点”。没有唯一顶层图（多张图都无 `parent`）时，外壳自动合成「系统总览」作为总，这是导航层行为，不需要也不应该为此写入 Graph。
 
 ## refs
 

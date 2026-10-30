@@ -1,0 +1,292 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["PyYAML>=6.0.2,<7"]
+# ///
+"""一键生成 Codemap 视图：Graph → archify 候选与事实侧车 → archify 渲染 → 下钻外壳 index.html。
+
+单张图失败不阻断其余；最后汇总成功 / 失败 / 跳过清单，存在失败时返回非零退出码。
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import glob
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+import yaml
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+SKILL_ROOT = SCRIPT_DIR.parent
+ARCHIFY_CLI = SKILL_ROOT / "renderers" / "archify" / "bin" / "archify.mjs"
+SHELL_TEMPLATE = SKILL_ROOT / "assets" / "shell-template.html"
+COMPILER = SCRIPT_DIR / "compile_graph"
+
+# 编译器当前能渲染的 layout.default；其余（force / state）只在外壳导航里占位
+SUPPORTED_LAYOUTS = {"swimlane", "layered"}
+CALL_TIMEOUT = 300
+
+
+def find_node() -> str:
+    """优先用 PATH 里的 node；脚本环境没有 nvm 时，取 ~/.nvm 下版本最新的。"""
+    found = shutil.which("node")
+    if found:
+        return found
+    candidates = glob.glob(os.path.expanduser("~/.nvm/versions/node/*/bin/node"))
+
+    def version_key(path: str) -> tuple[int, ...]:
+        match = re.search(r"/v(\d+)\.(\d+)\.(\d+)/", path)
+        return tuple(int(x) for x in match.groups()) if match else (0, 0, 0)
+
+    if not candidates:
+        sys.exit("找不到 node：请把 node 放进 PATH，或通过 nvm 安装")
+    return sorted(candidates, key=version_key)[-1]
+
+
+def load_graphs(graph_dir: Path) -> list[dict]:
+    graphs = []
+    for f in sorted(graph_dir.glob("*.yaml")):
+        data = yaml.safe_load(f.read_text(encoding="utf-8"))
+        if isinstance(data, dict) and data.get("schema") == "codemap.graph/v2":
+            data["_file"] = f
+            graphs.append(data)
+    return graphs
+
+
+def run(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess:
+    # 离线优先：默认关闭 Archify 的更新检查，避免 deliver/finalize 联网
+    env = {"ARCHIFY_UPDATE_CHECK_DISABLED": "1", **os.environ}
+    return subprocess.run(
+        cmd, cwd=str(cwd), capture_output=True, text=True, timeout=CALL_TIMEOUT, env=env
+    )
+
+
+def first_lines(text: str, n: int = 3) -> str:
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    return " | ".join(lines[:n])
+
+
+# 可读性不足时逐级缩短节点副标题（0 表示不写副标题，完整说明仍在事实侧车）
+SUBLABEL_LADDER = (26, 14, 0)
+
+
+def build_one(
+    graph: dict, root: Path, out_dir: Path, node: str, quality: str, finalize: bool
+) -> tuple[str, str]:
+    """逐级缩短副标题重试可读性失败；返回 (状态, 说明)。"""
+    state, note = "failed", ""
+    for index, limit in enumerate(SUBLABEL_LADDER):
+        state, note = build_attempt(graph, root, out_dir, node, quality, finalize, limit)
+        if state != "failed" or "readability" not in note:
+            break
+        if index + 1 < len(SUBLABEL_LADDER):
+            print(f"  {graph['id']}: 文字可读性不足，副标题上限降为 {SUBLABEL_LADDER[index + 1]} 重试", file=sys.stderr)
+            # Archify 不会覆盖上一次留下的浏览器检查证据，重试前清掉本图的全部派生产物
+            for stale in out_dir.glob(f"{graph['id']}.*"):
+                stale.unlink()
+    return state, note
+
+
+def build_attempt(
+    graph: dict, root: Path, out_dir: Path, node: str, quality: str, finalize: bool, sublabel_limit: int
+) -> tuple[str, str]:
+    """单次编译加渲染。状态：ok / failed / skipped。"""
+    gid = graph["id"]
+    layout = (graph.get("layout") or {}).get("default")
+    if layout not in SUPPORTED_LAYOUTS:
+        return "skipped", f"layout.default={layout} 暂不支持渲染"
+
+    compiled = run(
+        [
+            sys.executable,
+            str(COMPILER),
+            str(graph["_file"]),
+            "--out-dir",
+            str(out_dir),
+            "--repo-root",
+            str(root),
+            "--quality",
+            quality,
+            "--sublabel-limit",
+            str(sublabel_limit),
+        ],
+        cwd=SKILL_ROOT,
+    )
+    if compiled.returncode != 0:
+        return "failed", "编译失败：" + first_lines(compiled.stderr or compiled.stdout)
+
+    candidate = f"{gid}.candidate.json"
+    output = f"{gid}.html"
+    candidate_json = json.loads((out_dir / candidate).read_text(encoding="utf-8"))
+    diagram_type = candidate_json["diagram_type"]
+    verb = "finalize" if finalize else "deliver"
+    cmd = [
+        node,
+        str(ARCHIFY_CLI),
+        verb,
+        diagram_type,
+        candidate,
+        output,
+        "--repo-root",
+        str(root),
+        "--quality",
+        quality,
+        "--json",
+    ]
+    rendered = run(cmd, cwd=out_dir)
+    if rendered.returncode != 0:
+        return "failed", f"{verb} 失败：" + first_lines(rendered.stdout + "\n" + rendered.stderr)
+    note = ""
+    try:
+        receipt = json.loads(rendered.stdout)
+        warnings = (receipt.get("validation") or {}).get("warnings")
+        if warnings:
+            note = f"{warnings} 条告警"
+    except json.JSONDecodeError:
+        pass
+    return "ok", note
+
+
+def sub_target(value) -> str | None:
+    """节点 sub 形如相对路径 'billing-settlement.yaml'，取文件名主干作为子图 ID。"""
+    if not value:
+        return None
+    return Path(str(value)).stem
+
+
+def shell_data(graphs: list[dict], results: dict[str, tuple[str, str]], out_dir: Path, project: str) -> dict:
+    ids = {g["id"] for g in graphs}
+    items = []
+    for g in graphs:
+        gid = g["id"]
+        state, note = results.get(gid, (None, ""))
+        if state is None:
+            # 本次未处理（--only 之外）：以输出目录里是否已有 HTML 为准
+            rendered = (out_dir / f"{gid}.html").exists()
+            reason = None if rendered else "本次未生成"
+        else:
+            rendered = state == "ok"
+            reason = None if rendered else note
+
+        subs = {}
+        nodes = []
+        for n in g.get("nodes") or []:
+            target = sub_target(n.get("sub"))
+            if target and target in ids:
+                subs[n["id"]] = target
+            nodes.append(
+                {
+                    "id": n["id"],
+                    "label": n.get("label") or n["id"],
+                    "kind": n.get("kind"),
+                    "tags": [str(t) for t in (n.get("tags") or [])],
+                    "detail": n.get("detail") or "",
+                    "refs": [
+                        {"path": r.get("path", ""), "symbol": r.get("symbol") or ""}
+                        for r in (n.get("refs") or [])
+                    ],
+                }
+            )
+        parent = g.get("parent")
+        items.append(
+            {
+                "id": gid,
+                "title": g.get("title") or gid,
+                "domain": g.get("domain") or "未分类",
+                "kind": g.get("kind"),
+                "level": g.get("level"),
+                "status": g.get("status") or "current",
+                "verified_at": str(g["verified_at"]) if g.get("verified_at") else None,
+                "verified_commit": g.get("verified_commit"),
+                "summary": g.get("summary") or "",
+                "layout": (g.get("layout") or {}).get("default"),
+                "parent": {"graph": parent["graph"], "node": parent["node"]} if isinstance(parent, dict) else None,
+                "subs": subs,
+                "rendered": rendered,
+                "reason": reason,
+                "nodes": nodes,
+            }
+        )
+    return {"project": project, "graphs": items}
+
+
+def write_shell(data: dict, out_dir: Path) -> Path:
+    template = SHELL_TEMPLATE.read_text(encoding="utf-8")
+    # 防止 JSON 内出现 </script> 提前结束数据块
+    payload = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
+    html = template.replace("__CODEMAP_DATA__", payload).replace(
+        "__CODEMAP_PROJECT__", data["project"].replace("<", "&lt;")
+    )
+    target = out_dir / "index.html"
+    target.write_text(html, encoding="utf-8")
+    return target
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--root", required=True, help="项目根（含 .map/graphs）")
+    ap.add_argument("--out-dir", help="输出目录，默认 <root>/.map/views")
+    ap.add_argument("--only", nargs="*", default=[], help="只处理这些 Graph ID，外壳仍包含全部 Graph")
+    ap.add_argument("--finalize", action="store_true", help="用 archify finalize（含浏览器检查）代替 deliver")
+    ap.add_argument("--quality", default="standard", choices=["standard", "showcase"])
+    ap.add_argument("--no-mermaid", action="store_true", help="不生成 .mmd（check_graph 要求每张 Graph 都有最新的 .mmd）")
+    args = ap.parse_args()
+
+    root = Path(args.root).expanduser().resolve()
+    graph_dir = root / ".map" / "graphs"
+    if not graph_dir.is_dir():
+        sys.exit(f"找不到 Graph 目录: {graph_dir}")
+    out_dir = Path(args.out_dir).expanduser().resolve() if args.out_dir else root / ".map" / "views"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    graphs = load_graphs(graph_dir)
+    if not graphs:
+        sys.exit("没有找到 codemap.graph/v2 的 Graph")
+    unknown = set(args.only) - {g["id"] for g in graphs}
+    if unknown:
+        sys.exit(f"--only 指定了不存在的 Graph: {', '.join(sorted(unknown))}")
+
+    # 仅在写入项目自己的 .map/views 时生成 Mermaid：render_graph 按 Graph 的 view 字段落盘，
+    # 指定了别处的 --out-dir（试跑）就不能顺手改项目里的 .map
+    if not args.out_dir and not args.no_mermaid:
+        render_graph = SCRIPT_DIR / "render_graph"
+        for g in graphs:
+            if args.only and g["id"] not in args.only:
+                continue
+            drawn = run([sys.executable, str(render_graph), str(g["_file"])], SKILL_ROOT)
+            if drawn.returncode != 0:
+                print(f"! {g['id']}  Mermaid 生成失败：{first_lines(drawn.stderr or drawn.stdout)}", file=sys.stderr)
+
+    node = find_node()
+    results: dict[str, tuple[str, str]] = {}
+    for g in graphs:
+        if args.only and g["id"] not in args.only:
+            continue
+        state, note = build_one(g, root, out_dir, node, args.quality, args.finalize)
+        results[g["id"]] = (state, note)
+        mark = {"ok": "✓", "failed": "✗", "skipped": "-"}[state]
+        print(f"{mark} {g['id']}" + (f"  {note}" if note else ""))
+
+    shell = write_shell(shell_data(graphs, results, out_dir, root.name), out_dir)
+
+    ok = [k for k, v in results.items() if v[0] == "ok"]
+    failed = [k for k, v in results.items() if v[0] == "failed"]
+    skipped = [k for k, v in results.items() if v[0] == "skipped"]
+    print(f"\n成功 {len(ok)} · 失败 {len(failed)} · 跳过 {len(skipped)}")
+    for k in failed:
+        print(f"  失败 {k}: {results[k][1]}")
+    for k in skipped:
+        print(f"  跳过 {k}: {results[k][1]}")
+    print(f"外壳: {shell}")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
