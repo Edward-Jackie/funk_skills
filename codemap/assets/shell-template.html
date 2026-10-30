@@ -67,9 +67,10 @@
   .brand { font-weight: 650; letter-spacing: 0.02em; white-space: nowrap; }
   .brand small { color: var(--muted); font-weight: 400; margin-left: 6px; }
   .menu-btn {
-    display: none; border: 1px solid var(--line); background: var(--panel);
+    display: inline-block; border: 1px solid var(--line); background: var(--panel);
     border-radius: 6px; padding: 3px 9px; cursor: pointer;
   }
+  .menu-btn:hover, .menu-btn:focus-visible { border-color: var(--accent); color: var(--accent); outline: none; }
   .crumbs {
     flex: 1 1 auto; min-width: 0;
     display: flex; align-items: center; flex-wrap: nowrap; overflow: hidden;
@@ -197,9 +198,12 @@
   .tree-tools button:hover, .tree-tools button:focus-visible { color: var(--accent); border-color: var(--accent); outline: none; }
   .ov-item .s { color: var(--muted); font-size: 12px; margin-top: 2px; }
 
+  @media (min-width: 801px) {
+    body.nav-collapsed { grid-template-columns: 0 minmax(0, 1fr); }
+    body.nav-collapsed nav.tree { display: none; }
+  }
   @media (max-width: 800px) {
     body { grid-template-columns: minmax(0, 1fr); grid-template-areas: "top" "main"; }
-    .menu-btn { display: inline-block; }
     nav.tree {
       position: fixed; z-index: 8; top: 0; bottom: 0; left: 0; width: min(86vw, 320px);
       transform: translateX(-100%); transition: transform 0.16s; box-shadow: var(--shadow);
@@ -594,6 +598,7 @@
     var cur = itemEls.get(gid);
     if (cur && cur.scrollIntoView) cur.scrollIntoView({ block: 'nearest' });
     document.body.classList.remove('nav-open');
+    syncNavBtn();
   }
 
   // 系统总览：按「领域 - 视角」列出各自的总图入口，由此逐级下钻
@@ -704,9 +709,36 @@
     }
   });
 
-  document.getElementById('menu-btn').addEventListener('click', function () {
-    document.body.classList.toggle('nav-open');
+  // 左侧导航整体收起 / 展开：窄屏是抽屉，宽屏是收起整列，收起状态只存浏览器本地
+  var menuBtn = document.getElementById('menu-btn');
+  var narrow = window.matchMedia('(max-width: 800px)');
+  var NAV_KEY = 'codemap-nav:' + D.project;
+  function syncNavBtn() {
+    var open = narrow.matches ? document.body.classList.contains('nav-open') : !document.body.classList.contains('nav-collapsed');
+    menuBtn.setAttribute('aria-expanded', String(open));
+    menuBtn.setAttribute('aria-label', open ? '收起导航' : '展开导航');
+    menuBtn.title = (open ? '收起导航' : '展开导航') + '（快捷键 [）';
+  }
+  function toggleNav() {
+    if (narrow.matches) {
+      document.body.classList.toggle('nav-open');
+    } else {
+      var c = document.body.classList.toggle('nav-collapsed');
+      try { localStorage.setItem(NAV_KEY, c ? '1' : '0'); } catch (e) { /* 忽略 */ }
+    }
+    syncNavBtn();
+  }
+  try { if (localStorage.getItem(NAV_KEY) === '1') document.body.classList.add('nav-collapsed'); } catch (e) { /* 忽略 */ }
+  menuBtn.addEventListener('click', toggleNav);
+  document.addEventListener('keydown', function (ev) {
+    if (ev.key !== '[' || ev.ctrlKey || ev.metaKey || ev.altKey) return;
+    var t = ev.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    ev.preventDefault();
+    toggleNav();
   });
+  narrow.addEventListener('change', syncNavBtn);
+  syncNavBtn();
 
   /* ---------- 跨图检索 ---------- */
   var index = [];
