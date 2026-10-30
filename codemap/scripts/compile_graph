@@ -131,6 +131,67 @@ def assign_columns(nodes: list[dict]) -> tuple[dict[str, int], dict[str, int]]:
     return cols, offsets
 
 
+def flow_order_lanes(lanes: list[dict], nodes: list[dict]) -> list[dict]:
+    """泳道按「从入口开始的流程次序」排列：最小 level 小的在前，平局时保留声明顺序。
+    横向图入口泳道在最上、入口列在最左；纵向图入口层在最上。无节点的泳道排到最后。"""
+    first_level: dict[str, int] = {}
+    for n in nodes:
+        level = int(n.get("level") or 1)
+        first_level[n["_lane"]] = min(first_level.get(n["_lane"], level), level)
+    declared = {lane["id"]: i for i, lane in enumerate(lanes)}
+    return sorted(lanes, key=lambda lane: (first_level.get(lane["id"], 10**6), declared[lane["id"]]))
+
+
+def assign_vertical(
+    nodes: list[dict], lanes: list[dict], has_lanes: bool
+) -> tuple[list[dict], list[dict], dict[str, str], dict[str, int], dict[str, int]]:
+    """纵向图（direction: TB）：Archify workflow 的泳道恒为横向行、列恒为左右次序，
+    所以转置——每个 level 成一行（入口层在最上），原泳道成列并用 phases 作列头。
+    没有声明泳道时，同一层的节点依次占用相邻列。"""
+    levels = sorted({int(n.get("level") or 1) for n in nodes})
+    rank_of = {lv: i for i, lv in enumerate(levels)}
+    a_lanes = [{"id": f"rank{i + 1}", "label": f"第 {i + 1} 层"} for i in range(len(levels))]
+
+    lane_idx = {lane["id"]: i for i, lane in enumerate(lanes)}
+    if has_lanes and len(lanes) > MAX_COL + 1:
+        raise CompileError(f"纵向图有 {len(lanes)} 条泳道（上限 {MAX_COL + 1}），请拆分 detail 图")
+
+    cells: dict[tuple[int, int], list[dict]] = {}
+    per_rank: dict[int, int] = {}
+    for n in nodes:
+        rank = rank_of[int(n.get("level") or 1)]
+        if has_lanes:
+            col = lane_idx[n["_lane"]]
+        else:
+            col = per_rank.get(rank, 0)
+            per_rank[rank] = col + 1
+            if col > MAX_COL:
+                raise CompileError(f"纵向图第 {rank + 1} 层有超过 {MAX_COL + 1} 个节点，请拆分 detail 图")
+        cells.setdefault((rank, col), []).append(n)
+
+    lane_of: dict[str, str] = {}
+    cols: dict[str, int] = {}
+    offsets: dict[str, int] = {}
+    for (rank, col), group in cells.items():
+        if len(group) > MAX_STACK:
+            raise CompileError(f"第 {rank + 1} 层第 {col} 列堆叠了 {len(group)} 个节点（上限 {MAX_STACK}），请拆分 detail 图")
+        for i, n in enumerate(group):
+            lane_of[n["id"]] = a_lanes[rank]["id"]
+            cols[n["id"]] = col
+            if len(group) > 1:
+                offsets[n["id"]] = int((i - (len(group) - 1) / 2) * STACK_STEP)
+
+    phases = (
+        [
+            {"id": check_id("列头", f"col-{lane['id']}"), "label": str(lane["label"]), "fromCol": i, "toCol": i}
+            for i, lane in enumerate(lanes)
+        ]
+        if has_lanes
+        else []
+    )
+    return a_lanes, phases, lane_of, cols, offsets
+
+
 def sibling_title(base_dir: Path, graph_id: str) -> str:
     """读取同目录兄弟 Graph 的标题；找不到时退回 ID，供下钻按钮显示。"""
     path = base_dir / f"{graph_id}.yaml"
@@ -161,11 +222,19 @@ def compile_graph(
         lanes = [{"id": "main", "label": str(graph.get("title") or graph["id"])}]
     for n in nodes:
         n["_lane"] = n.get("lane") or lanes[0]["id"]
+    direction = str(layout.get("direction") or "LR").upper()
+    if direction not in ("LR", "TB"):
+        raise CompileError(f"layout.direction 只能是 LR 或 TB：{layout.get('direction')!r}")
+    lanes = flow_order_lanes(lanes, nodes)
 
     repo = repository_meta(repo_root, graph) if repo_root else None
     if repo_root and repo is None:
         print(f"警告 {graph['id']}: {repo_root} 没有 origin 或取不到版本，源码锚点只进侧车，不进图", file=sys.stderr)
-    cols, offsets = assign_columns(nodes)
+    if direction == "TB":
+        a_lanes, phases, lane_of, cols, offsets = assign_vertical(nodes, lanes, bool(lanes_decl))
+    else:
+        cols, offsets = assign_columns(nodes)
+        a_lanes, phases, lane_of = lanes, [], {n["id"]: n["_lane"] for n in nodes}
     node_ids = {n["id"] for n in nodes}
 
     a_nodes, facts_nodes = [], {}
@@ -174,7 +243,7 @@ def compile_graph(
         refs = n.get("refs") or []
         item = {
             "id": nid,
-            "lane": n["_lane"],
+            "lane": lane_of[nid],
             "col": cols[nid],
             "type": NODE_TYPE.get(n.get("kind"), "backend"),
             "label": str(n["label"]),
@@ -244,10 +313,12 @@ def compile_graph(
             "output": f"{graph['id']}.html",
             "quality_profile": quality,
         },
-        "lanes": lanes,
+        "lanes": a_lanes,
         "nodes": a_nodes,
         "edges": a_edges,
     }
+    if phases:
+        candidate["phases"] = phases
     if repo:
         candidate["meta"]["repository"] = repo
     titles: dict[str, str] = {}
