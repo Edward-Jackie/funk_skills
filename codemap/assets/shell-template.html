@@ -71,6 +71,16 @@
     border-radius: 6px; padding: 3px 9px; cursor: pointer;
   }
   .menu-btn:hover, .menu-btn:focus-visible { border-color: var(--accent); color: var(--accent); outline: none; }
+  .nav-fab {
+    display: none; position: fixed; z-index: 7; top: 54px; left: 12px;
+    align-items: center; justify-content: center;
+    border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+    border-radius: 6px; padding: 3px 9px; cursor: pointer;
+    box-shadow: var(--shadow);
+  }
+  .nav-fab:hover, .nav-fab:focus-visible { border-color: var(--accent); color: var(--accent); outline: none; }
+  .tree-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 6px 8px; }
+  .tree-head .tree-tools { padding: 0; }
   .crumbs {
     flex: 1 1 auto; min-width: 0;
     display: flex; align-items: center; flex-wrap: nowrap; overflow: hidden;
@@ -199,10 +209,13 @@
   .ov-item .s { color: var(--muted); font-size: 12px; margin-top: 2px; }
 
   @media (min-width: 801px) {
+    .top .menu-btn { display: none; }
     body.nav-collapsed { grid-template-columns: 0 minmax(0, 1fr); }
     body.nav-collapsed nav.tree { display: none; }
+    body.nav-collapsed .nav-fab { display: inline-flex; }
   }
   @media (max-width: 800px) {
+    .nav-fab { display: none !important; }
     body { grid-template-columns: minmax(0, 1fr); grid-template-areas: "top" "main"; }
     nav.tree {
       position: fixed; z-index: 8; top: 0; bottom: 0; left: 0; width: min(86vw, 320px);
@@ -229,6 +242,7 @@
 </header>
 <nav class="tree" id="tree" aria-label="地图导航"></nav>
 <main>
+  <button class="nav-fab" id="nav-fab" type="button" aria-label="展开导航" title="展开导航（快捷键 [）">☰</button>
   <section class="info" id="info"></section>
   <div class="stage" id="stage"></div>
 </main>
@@ -391,6 +405,7 @@
     return wrap;
   }
 
+  var treeHead = el('div', 'tree-head');
   var tools = el('div', 'tree-tools');
   function foldAll(collapse) {
     treeEl.querySelectorAll('[data-fold]').forEach(function (n) {
@@ -407,7 +422,13 @@
     b.addEventListener('click', function () { foldAll(spec[1]); });
     tools.appendChild(b);
   });
-  treeEl.appendChild(tools);
+  treeHead.appendChild(tools);
+  var navToggle = el('button', 'menu-btn nav-toggle', '☰');
+  navToggle.id = 'nav-toggle';
+  navToggle.type = 'button';
+  navToggle.setAttribute('aria-label', '收起导航');
+  treeHead.appendChild(navToggle);
+  treeEl.appendChild(treeHead);
 
   if (HAS_OVERVIEW) {
     var ovWrap = el('div', 'gnode');
@@ -710,14 +731,18 @@
   });
 
   // 左侧导航整体收起 / 展开：窄屏是抽屉，宽屏是收起整列，收起状态只存浏览器本地
-  var menuBtn = document.getElementById('menu-btn');
+  var navButtons = ['menu-btn', 'nav-toggle', 'nav-fab'].map(function (id) {
+    return document.getElementById(id);
+  }).filter(Boolean);
   var narrow = window.matchMedia('(max-width: 800px)');
   var NAV_KEY = 'codemap-nav:' + D.project;
   function syncNavBtn() {
     var open = narrow.matches ? document.body.classList.contains('nav-open') : !document.body.classList.contains('nav-collapsed');
-    menuBtn.setAttribute('aria-expanded', String(open));
-    menuBtn.setAttribute('aria-label', open ? '收起导航' : '展开导航');
-    menuBtn.title = (open ? '收起导航' : '展开导航') + '（快捷键 [）';
+    navButtons.forEach(function (btn) {
+      btn.setAttribute('aria-expanded', String(open));
+      btn.setAttribute('aria-label', open ? '收起导航' : '展开导航');
+      btn.title = (open ? '收起导航' : '展开导航') + '（快捷键 [）';
+    });
   }
   function toggleNav() {
     if (narrow.matches) {
@@ -729,7 +754,7 @@
     syncNavBtn();
   }
   try { if (localStorage.getItem(NAV_KEY) === '1') document.body.classList.add('nav-collapsed'); } catch (e) { /* 忽略 */ }
-  menuBtn.addEventListener('click', toggleNav);
+  navButtons.forEach(function (btn) { btn.addEventListener('click', toggleNav); });
   document.addEventListener('keydown', function (ev) {
     if (ev.key !== '[' || ev.ctrlKey || ev.metaKey || ev.altKey) return;
     var t = ev.target;
