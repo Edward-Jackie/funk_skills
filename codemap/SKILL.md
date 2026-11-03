@@ -68,8 +68,11 @@ CODEMAP 是带证据的导航缓存，不替代源码、测试、运行环境或
    ```bash
    scripts/build_views --root <项目根>              # 编译 + 渲染 + 外壳，输出 .map/views/
    scripts/build_views --root <项目根> --finalize   # 每页走 Archify 完整门禁（含真实浏览器检查）
+   scripts/build_views --root <项目根> --strict-layout --finalize  # 关系线交叉/共享走廊/箭头碰撞时失败
    scripts/build_views --root <项目根> --only <graph-id>
    ```
+
+   `--strict-layout` 会在渲染后运行组合检查，命中 `proper-crossing`、`ambiguous-corridor`、`arrowhead-collision`、`label-route-clearance`、`container-border-run` 时直接判失败。处理原则是拆图或聚合节点，不要靠增加节点硬挤；线太密时先回到 Graph 结构。
 
    每张图独立失败不阻断其余；退出码非零表示有失败。有源码锚点的图会带 `meta.repository`，锚点在固定版本不存在时不进图（仍留在侧车），并给出警告。
 9. **AI 取最小上下文**：`scripts/query_graph .map/graphs --query '<需求>' --depth 2`，优先加载命中节点的 Markdown 章节、规则、风险与锚点。命中带 `sub` 的节点会提示可下钻的子图，分图命中会输出上级链。
@@ -78,13 +81,14 @@ CODEMAP 是带证据的导航缓存，不替代源码、测试、运行环境或
 
 ## 读图方式（给人）
 
-打开 `.map/views/index.html`：左侧导航整体可收起 / 展开（侧栏顶部右侧 ☰ 按钮或快捷键 `[`，状态记在浏览器本地；收起后内容区左上角出现「展开导航」按钮），分组与子图也可逐级折叠或「全部收起」。导航按「总 → 分 → 分」生成：分组标题合并为一行「领域 - 视角」（如 `billing - 业务视角`），组内按 `parent` 链逐级嵌套，层数不限；存在多张并列的顶层图时，自动合成「系统总览」作为总入口，各顶层图成为它下面的分；顶部有面包屑和跨图检索（快捷键 `/`，支持中文子串，搜节点名、ID、标签、说明、锚点）。图页面里点节点或边，侧栏出现「Codemap」区：完整说明、标签、证据等级、`path -> symbol` 锚点、边的触发条件；有 `sub` 的节点带「下钻」入口，子图带「上级图」入口。Archify 原有的节点查找、路径探查、可达性、导出等能力全部保留。
+打开 `.map/views/index.html`：左侧导航整体可收起 / 展开（侧栏顶部右侧 ☰ 按钮或快捷键 `[`，状态记在浏览器本地；收起后内容区左上角出现「展开导航」按钮），分组与子图也可逐级折叠或「全部收起」。导航按「总 → 分 → 分」生成：分组标题合并为一行「领域 - 视角」（如 `billing - 业务视角`），组内按 `parent` 链逐级嵌套，层数不限；存在多张并列的顶层图时，自动合成「系统总览」作为总入口，各顶层图成为它下面的分；顶部有面包屑和跨图检索（快捷键 `/`，支持中文子串，搜节点名、ID、标签、说明、锚点）。图页面里点节点或边，侧栏出现「Codemap」区：完整说明、标签、证据等级、`path -> symbol` 锚点、边的触发条件；有 `sub` 的节点带「下钻」入口，卡片右下角同时显示 `↳ 下钻 N` 按钮（N 为子图节点数，业务图用暖色、冲突图用红色，可点击直达），子图带「上级图」入口。Archify 原有的节点查找、路径探查、可达性、导出等能力全部保留。
 
 ## 当前能力边界（未实现的不得宣称已支持）
 
 - **已支持**：`layout.default` 为 `swimlane` / `layered` 的 Graph（编译为 Archify workflow）。所有图从入口层开始排：`direction: LR` 入口在最左、入口泳道在最上；`TB` 入口在最上（level 成行、泳道成列，最多 6 条泳道）。`level` 压缩到 6 列，同泳道同列最多堆叠 4 个节点，超出时编译报错并提示拆 detail 图。
-- **未支持**：`state`（生命周期）与 `force` 布局的 Graph 会被跳过并列入汇总；需求 Overlay 的三镜头渲染、力导向发现图、提交钩子自动更新；Graph 的 `rules` 绑定字段已透传到侧车，但 `check_graph` 尚未校验它。
+- **未支持**：`state`（生命周期）与 `force` 布局的 Graph 会被跳过并列入汇总；需求 Overlay 的三镜头渲染、力导向发现图、提交钩子自动更新；Graph 的 `rules` 绑定字段已透传到侧车，但 `check_graph` 尚未校验它；**画布批注图层与 Overlay 涂层**（`build_views`/`compile_graph` 尚无 overlay 参数，页面上做不出任何涂层，排在 v3.2）。
 - **无 Graph 源头的图类型**（erd、class、tree、timeline、waterfall、explainer）：不经 Graph 编译，需要时直接用内置 Archify 按其 SKILL 流程出图，不进下钻外壳。
+- 版本路线、v3.1 改造顺序与 MCP 边界见 [改造方向与分层契约](references/product-direction.md)。
 - 渲染链路的完整边界与待办见 [Archify 集成](references/archify-integration.md)。
 
 ## 写作约束
