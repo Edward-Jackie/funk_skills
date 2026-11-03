@@ -4,12 +4,17 @@
 set -uo pipefail
 
 STRICT=0
+AGE=0
 MAP_ROOT=""
 INDEX_ARG=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --strict)
       STRICT=1
+      shift
+      ;;
+    --age)
+      AGE=1
       shift
       ;;
     --map-root)
@@ -252,7 +257,7 @@ while IFS="$(printf '\t')" read -r path symbol source commit; do
 
   checked=$((checked + 1))
   if [ ! -f "$ROOT/$path" ]; then
-    strict_warn "$source 的锚点文件不存在：$path"
+    error "$source 的锚点文件不存在（地图已失效）：$path"
     continue
   fi
 
@@ -260,7 +265,7 @@ while IFS="$(printf '\t')" read -r path symbol source commit; do
     *.sql|*.yaml|*.yml|*.json|*.toml)
       if [ "$symbol" != "-" ]; then
         grep -Fq "$symbol" "$ROOT/$path" 2>/dev/null \
-          || strict_warn "$source 的 SQL/配置键未找到：$path -> $symbol"
+          || error "$source 的 SQL/配置键不存在（地图已失效）：$path -> $symbol"
       fi
       ;;
     *)
@@ -273,7 +278,7 @@ while IFS="$(printf '\t')" read -r path symbol source commit; do
           if grep -Fq "$symbol" "$ROOT/$path" 2>/dev/null; then
             strict_warn "$source 的符号只有普通引用、没有定义式匹配：$path -> $symbol"
           else
-            strict_warn "$source 的锚点符号不存在：$path -> $symbol"
+            error "$source 的锚点符号不存在（地图已失效）：$path -> $symbol"
           fi
         fi
       elif ! grep -Fq "$symbol" "$ROOT/$path" 2>/dev/null; then
@@ -290,6 +295,31 @@ done < "$ANCHORS"
 
 [ "$checked" -gt 0 ] || warn "未发现任何可校验锚点"
 echo "已检查 ${checked} 条锚点，其中 ${stale} 条需要重新核对。"
+
+if [ "$AGE" -eq 1 ]; then
+  echo
+  if [ -x "$SCRIPT_DIR/freshness" ]; then
+    age_output="$(UV_QUIET=1 "$SCRIPT_DIR/freshness" --root "$ROOT" --map-root "$MAP_DIR" 2>&1)"
+    age_rc=$?
+    printf '%s\n' "$age_output"
+    if [ "$age_rc" -ne 0 ]; then
+      error "新鲜度检查执行失败"
+    else
+      age_level="$(printf '%s\n' "$age_output" | sed -n 's/^总体：\([a-z-]*\).*/\1/p' | head -1)"
+      case "$age_level" in
+        needs-review|stale|conflict)
+          warn "建议把相关文件 status 改为 needs-review，复核后同步 verified-commit"
+          error "新鲜度未通过（${age_level}）：地图已过期或待复核，请更新锚点与 status 后重跑"
+          ;;
+        aging)
+          warn "地图已进入 aging：基线领先较多，建议尽快复核"
+          ;;
+      esac
+    fi
+  else
+    warn "缺少 freshness 脚本，无法输出 --age"
+  fi
+fi
 
 echo
 echo "== 结论：错误 ${errors}，注意 ${warnings} =="

@@ -136,6 +136,7 @@ git -C "$FIXTURE" add .map
 git -C "$FIXTURE" commit -qm 'add maps'
 
 (cd "$FIXTURE" && "$CHECK" --strict .map/CODEMAP.md)
+(cd "$FIXTURE" && "$CHECK" --age .map/CODEMAP.md)
 
 expect_graph_failure() {
   local expected="$1"
@@ -196,5 +197,19 @@ if (cd "$FIXTURE" && "$CHECK" --strict .map/CODEMAP.md >/dev/null 2>&1); then
   echo "expected stale source to fail" >&2
   exit 1
 fi
+if (cd "$FIXTURE" && "$CHECK" --age .map/CODEMAP.md >/dev/null 2>&1); then
+  echo "expected --age to fail on changed anchors" >&2
+  exit 1
+fi
+git -C "$FIXTURE" restore src/billing.go
+
+perl -pi -e 's/func Settle/func Renamed/' "$FIXTURE/src/billing.go"
+output="$(cd "$FIXTURE" && "$CHECK" .map/CODEMAP.md 2>&1)" || true
+if ! printf '%s\n' "$output" | grep -Fq "锚点符号不存在"; then
+  echo "expected missing symbol to fail check_map" >&2
+  printf '%s\n' "$output" >&2
+  exit 1
+fi
+git -C "$FIXTURE" restore src/billing.go
 
 echo "check_map.sh tests passed"

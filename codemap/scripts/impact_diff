@@ -9,11 +9,16 @@ from __future__ import annotations
 
 import argparse
 import subprocess
+import sys
 from collections import deque
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from freshness_lib import banner, compute  # noqa: E402
 
 
 GRAPH_SCHEMA = "codemap.graph/v2"
@@ -214,9 +219,13 @@ def render_report(
     root: Path,
     depth: int,
     base: str | None,
+    freshness: dict[str, Any] | None = None,
 ) -> str:
     by_id = {g["id"]: g for _, g in graphs if isinstance(g.get("id"), str)}
     lines = ["# Codemap Git Diff 影响分析", ""]
+    warning = banner(freshness) if freshness else ""
+    if warning:
+        lines = [warning.rstrip(), "", *lines]
     lines.append(f"> 范围：{f'`{base}...HEAD` 加当前工作区' if base else '当前暂存区、工作区和未跟踪文件'}；下游深度：{depth}")
     lines.extend(["", "## 变更文件", ""])
     if not changes:
@@ -375,7 +384,14 @@ def main() -> int:
             else changed_paths(root, args.base)
         )
         graphs = load_graphs(target)
-        content = render_report(changes, graphs, root, args.depth, args.base)
+        map_dir = target if target.is_dir() else target.parent
+        if map_dir.name in {"graphs", "overlays"}:
+            map_dir = map_dir.parent
+        try:
+            freshness = compute(root, map_dir) if map_dir.is_dir() else None
+        except (OSError, ValueError, subprocess.SubprocessError):
+            freshness = None
+        content = render_report(changes, graphs, root, args.depth, args.base, freshness)
     except ValueError as exc:
         parser.error(str(exc))
 

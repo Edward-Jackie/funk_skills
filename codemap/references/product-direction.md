@@ -1,6 +1,6 @@
 # 改造方向与分层契约
 
-> 当前基线版本：**Codemap 3.0**（事实层沿用 Graph v2，渲染层为内置 Archify 3.2 分支）
+> 当前基线版本：**Codemap 3.1**（事实层沿用 Graph v2，渲染层为内置 Archify 3.2 分支）
 
 Codemap 首先是 AI 的项目认知层，其次才是人的可视化入口。改造先冻结职责和信息流，再从源码生成地图；旧地图不能成为新版设计约束。
 
@@ -11,7 +11,7 @@ Codemap 首先是 AI 的项目认知层，其次才是人的可视化入口。�
 | 版本 | 状态 | 范围 | 定调 |
 |---|---|---|---|
 | v3.0 | 已交付 | Markdown + Graph v2 + 内置 Archify 渲染、下钻外壳、`query_graph`、`impact_diff` | 当前基线；Explorer 已退役 |
-| v3.1 | 进行中 | ① 新鲜度守卫（过期分级、可失败、读取前警告）② 收益度量 ③ 页面级五层锚点 ④ MCP 只读取数层 | **只改校验、采集与取数层，不碰渲染链** |
+| v3.1 | 进行中（①④ 已落地，② 部分） | ① 新鲜度守卫（过期分级、可失败、读取前警告）② 收益度量（M1 命中日志 / M4 过期比例）③ 页面级五层锚点 ④ MCP 只读取数层 | **只改校验、采集与取数层，不碰渲染链** |
 | v3.2 | 未开工 | 画布批注图层、Overlay 三镜头渲染、viewer 补丁层扩展 | 讨论层；开工前须先验证侧车方案 U1 |
 
 ### v3.1 顺序（依赖关系，不可跳步）
@@ -31,10 +31,11 @@ Codemap 首先是 AI 的项目认知层，其次才是人的可视化入口。�
 
 MCP 只包装同一套 Core，**只读、不写、不缓存第二份状态**：
 
-- 只暴露读取类能力（发现项目、任务路由、查询子图、精确读章节、规则台账、影响反查、合并校验）。
+- 工具：`codemap_list_projects`、`codemap_status`、`codemap_route`、`codemap_read`、`codemap_query`、`codemap_rules`、`codemap_impact`、`codemap_check`、`codemap_docs`。
 - 每次响应必须携带新鲜度信封；`level` 非 `fresh` 时不得用确定语气给结论。
 - 空命中必须给出原因，**不得被解读为"业务不存在"**。
-- 缓存键用 `.map` 目录 mtime + `git HEAD` 三元组，**禁止 TTL 兜底**（TTL 会让过期看起来新鲜）。
+- `codemap_read` 缺省返回章节目录，按 `heading` 精确读取；`codemap_check` 等价 `check_map.sh --age`。
+- 写入工具默认不注册；只有设置 `CODEMAP_ENABLE_WRITE=1` 后才出现，仍须用户明确要求。
 - 写地图、建图、`build_views` 等仍留在 skill 与 CLI，不进 MCP。
 
 ## 两类使用者

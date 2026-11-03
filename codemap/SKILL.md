@@ -1,6 +1,6 @@
 ---
 name: codemap
-version: "3.0"
+version: "3.1"
 description: >
   生成、读取和维护跨 AI 共用的 CODEMAP：把开发任务、故障现象与代码锚点关联起来，并从同一份结构化 Graph 编译成 Archify 质量的可下钻业务图（泳道、分层、跨图检索、侧栏展示条件/证据/源码锚点）、Git Diff 反查和按需 AI 上下文。用户要求梳理代码结构、调用链、改动入口、业务规则、影响范围或可视化时使用；已有地图且在陌生模块反复搜索、做跨域影响分析或高风险改动时按需读取。不要为普通 CRUD 或一次搜索即可定位的局部改动建图。
 ---
@@ -47,9 +47,11 @@ CODEMAP 是带证据的导航缓存，不替代源码、测试、运行环境或
 .map/views/<flow>.facts.json     # 事实侧车（派生）：condition、证据、锚点、下钻、规则
 .map/overlays/<task>.yaml        # 单需求影响覆盖层，默认不并入基础 Graph
 .map/context/<task>.md           # 按需求生成的临时 AI 上下文包
+.map/.metrics/query.jsonl        # M1 读图命中率（本地度量，必须 gitignore）
 ```
 
 - L1/L2 扁平同级；名称只用小写英文、数字和连字符。L1 目标不超过 120 行，L2 不超过 240 行。
+- `.map/.metrics/` 只用于 M1/M4 的本机度量，不进版本控制、不上报、不阻塞查询。
 - `AGENTS.md`、`CLAUDE.md` 等入口只引用同一份 `.map/CODEMAP.md`，不复制正文。
 - 旧 `.claude/` 或 `.codex/` 里的 `CODEMAP*` 先读 [迁移规范](references/migration.md)，不得留下两套事实源。
 - 基础 Graph 只保存已存在或已确认的事实；未实施需求写入 Overlay，标 `proposal/unverified`。
@@ -62,7 +64,7 @@ CODEMAP 是带证据的导航缓存，不替代源码、测试、运行环境或
 4. **选择分层**：`scripts/count_sources.sh [项目根]` 取规模提示；源码超过 50、核心领域超过 4、L1 预计超过 120 行时拆 L2。
 5. **逐条取证**：锚点用 `路径 -> 符号/SQL/配置键`，不存行号；找不到证据的隐式钩子标 `unverified`。
 6. **生成 Graph**：按 [Graph Schema](references/graph-schema.md) 从源码和人工规则重新生成，YAML 是节点、边、泳道、条件、证据的唯一结构化源。Summary 最多 12 个节点，detail 最多 18 个；超过就用节点 `sub` 拆 detail 图。
-7. **生成视图并校验事实层**：`check_graph` 要求每张 Graph 的 `view` 指向最新的 `.mmd`，所以新写的 Graph 必须先有 `.mmd`。第 8 步的 `scripts/build_views` 在默认输出到 `.map/views/` 时会先替每张图运行 `render_graph`；单张可手动 `scripts/render_graph .map/graphs/<flow>.yaml`。之后再运行 `scripts/check_graph .map/graphs` 与 `scripts/check_map.sh [--strict] .map/CODEMAP.md`。
+7. **生成视图并校验事实层**：`check_graph` 要求每张 Graph 的 `view` 指向最新的 `.mmd`，所以新写的 Graph 必须先有 `.mmd`。第 8 步的 `scripts/build_views` 在默认输出到 `.map/views/` 时会先替每张图运行 `render_graph`；单张可手动 `scripts/render_graph .map/graphs/<flow>.yaml`。之后再运行 `scripts/check_graph .map/graphs` 与 `scripts/check_map.sh --age .map/CODEMAP.md`。`--age` 会逐文件输出领先提交数、基线天数和变化/失效锚点；`needs-review`、`stale`、`conflict` 直接判失败，`aging` 只告警。
 8. **生成可下钻视图**：
 
    ```bash
@@ -75,9 +77,21 @@ CODEMAP 是带证据的导航缓存，不替代源码、测试、运行环境或
    `--strict-layout` 会在渲染后运行组合检查，命中 `proper-crossing`、`ambiguous-corridor`、`arrowhead-collision`、`label-route-clearance`、`container-border-run` 时直接判失败。处理原则是拆图或聚合节点，不要靠增加节点硬挤；线太密时先回到 Graph 结构。
 
    每张图独立失败不阻断其余；退出码非零表示有失败。有源码锚点的图会带 `meta.repository`，锚点在固定版本不存在时不进图（仍留在侧车），并给出警告。
-9. **AI 取最小上下文**：`scripts/query_graph .map/graphs --query '<需求>' --depth 2`，优先加载命中节点的 Markdown 章节、规则、风险与锚点。命中带 `sub` 的节点会提示可下钻的子图，分图命中会输出上级链。
-10. **开发后反查影响**：`scripts/impact_diff .map/graphs [--base <rev>]`；Diff 未命中必须明确报告，不能解释为「没有业务影响」。
+9. **AI 取最小上下文**：`scripts/query_graph .map/graphs --query '<需求>' --depth 2`，优先加载命中节点的 Markdown 章节、规则、风险与锚点。命中带 `sub` 的节点会提示可下钻的子图，分图命中会输出上级链。地图非 `fresh` 时，输出首行先给新鲜度横幅，再给结果。
+10. **开发后反查影响**：`scripts/impact_diff .map/graphs [--base <rev>]`；Diff 未命中必须明确报告，不能解释为「没有业务影响」。同样先输出新鲜度横幅。
 11. **增量写入**：保留所有 `<!-- manual: keep -->` 块，只改变化的事实；不创建 `.bak`，历史交给 Git。
+
+## MCP 取数层（v3.1）
+
+MCP 只包装同一套脚本，不复制检索逻辑，**只读、不写**。客户端按需选择，不替代 skill 的写作纪律。
+
+- 工具：`codemap_list_projects`、`codemap_status`、`codemap_route`、`codemap_read`、`codemap_query`、`codemap_rules`、`codemap_impact`、`codemap_check`、`codemap_docs`。
+- 每次读取返回统一信封：`freshness`、`disclaimer`、`hits`、`warnings`、`empty_reason`、`next`。`freshness.level` 取 `fresh | aging | needs-review | stale | conflict | unknown`；非 `fresh` 时只能当线索。
+- `codemap_read` 不传 `heading` 只返回章节目录；传 `heading` 读具体章节，`max_lines` 控制截断。Graph YAML 直接读正文。
+- `codemap_check` 等价 `check_map.sh --age`，返回结构化的 `errors`、`warnings`、失效锚点和新鲜度，校验失败不抛异常。
+- 度量只落本地：`query_graph` 追加 `.map/.metrics/query.jsonl`（M1），`freshness` 输出锚点过期比例（M4）；不上报、不阻塞。
+- 写入工具默认未注册；确需写入时设置 `CODEMAP_ENABLE_WRITE=1` 后重启服务，且仍须用户明确要求。
+- 启动时比较本地 skill 与 MCP 基线版本：一致用本地，不一致用高版本；选不到可用副本直接拒绝启动。
 
 ## 读图方式（给人）
 
@@ -86,6 +100,7 @@ CODEMAP 是带证据的导航缓存，不替代源码、测试、运行环境或
 ## 当前能力边界（未实现的不得宣称已支持）
 
 - **已支持**：`layout.default` 为 `swimlane` / `layered` 的 Graph（编译为 Archify workflow）。所有图从入口层开始排：`direction: LR` 入口在最左、入口泳道在最上；`TB` 入口在最上（level 成行、泳道成列，最多 6 条泳道）。`level` 压缩到 6 列，同泳道同列最多堆叠 4 个节点，超出时编译报错并提示拆 detail 图。
+- **已支持（v3.1）**：`check_map.sh --age` 的新鲜度守卫（领先提交、基线天数、失效锚点，过期直接失败）；`query_graph` / `impact_diff` 的前置新鲜度横幅；MCP 只读取数层（9 个工具，统一 freshness 信封，写入默认关闭）。
 - **未支持**：`state`（生命周期）与 `force` 布局的 Graph 会被跳过并列入汇总；需求 Overlay 的三镜头渲染、力导向发现图、提交钩子自动更新；Graph 的 `rules` 绑定字段已透传到侧车，但 `check_graph` 尚未校验它；**画布批注图层与 Overlay 涂层**（`build_views`/`compile_graph` 尚无 overlay 参数，页面上做不出任何涂层，排在 v3.2）。
 - **无 Graph 源头的图类型**（erd、class、tree、timeline、waterfall、explainer）：不经 Graph 编译，需要时直接用内置 Archify 按其 SKILL 流程出图，不进下钻外壳。
 - 版本路线、v3.1 改造顺序与 MCP 边界见 [改造方向与分层契约](references/product-direction.md)。
@@ -105,6 +120,7 @@ CODEMAP 是带证据的导航缓存，不替代源码、测试、运行环境或
 - 一个真实任务或故障现象能从 L1 在两步内到达最小 L2 和首个锚点。
 - 高风险领域记录了业务成功、状态真相、不变量、幂等、副作用和失败补偿。
 - Graph 无重复 ID、悬空边、孤立节点、缺失条件、失效 refs 或未声明环；生成视图已被 Markdown 引用。
+- `scripts/check_map.sh --age .map/CODEMAP.md` 通过；过期、失效锚点或冲突必须明确交付为风险，不得伪造 `current`。
 - `scripts/build_views --finalize` 全部通过，节点与边 ID 在 Graph、候选、侧车、HTML 间一致。
 - 点击节点/边能看到条件、证据与源码锚点；summary 到 detail 能两跳进退，面包屑正确。
 - 结构检查、浏览器检查和人眼视觉复核分别报告，未做的不得声称已验收。

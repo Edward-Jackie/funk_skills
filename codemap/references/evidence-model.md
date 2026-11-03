@@ -84,7 +84,24 @@ verified-commit: 0123456789abcdef
 - 文件未变化：只说明证据源没变，不证明结论正确。
 - 无法机械验证的 SQL 名、配置键或复杂语言符号：报告为降级检查，不得伪装成定义式验证。
 
-只降级受影响条目，不把整张地图判死。
+只降级受影响条目，不因为个别锚点变化就篡改其他条目的证据等级。
+
+### 过期分级（v3.1）
+
+`verified-commit` 之外，新鲜度统一按下列等级输出（`scripts/freshness`、`check_map.sh --age`、MCP `freshness` 同源）：
+
+| 等级 | 判定 | 行为 |
+|---|---|---|
+| `fresh` | 基线有效，锚点文件未变化，领先未超阈值 | 可正常引用，仍不证明结论正确 |
+| `aging` | 领先超过 20 个提交或基线超过 14 天，但锚点未变化 | 只告警，提醒尽快复核 |
+| `needs-review` | 锚点证据文件在基线后变化，或 `status: needs-review` | 只能当线索；`--age` 判失败 |
+| `stale` | 锚点文件或符号消失，或 `verified-commit` 不存在 | 只能当线索；`--age` 判失败 |
+| `conflict` | 存在 `[CONFLICT][conflict]` 或 `status: conflict` | 保留两边证据；`--age` 判失败 |
+
+- `check_map.sh --age` 对 `needs-review`、`stale`、`conflict` 直接判失败，并提示更新 `status` 与 `verified-commit`；`aging` 只告警。
+- `query_graph` / `impact_diff` 在地图非 `fresh` 时先输出新鲜度横幅，但**仍返回锚点结果**：过期不阻断读取，只阻断确定语气。
+- MCP 响应必须携带 `freshness` 信封；`level != fresh` 时附 `disclaimer`，`hits` 为空时给 `empty_reason`。
+- M4 过期比例 = 有问题的锚点数 / 锚点总数；M1 命中日志写入 `.map/.metrics/query.jsonl`，两者都只留本地。
 
 ## 冲突
 
