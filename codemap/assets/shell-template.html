@@ -714,7 +714,7 @@
       // 图页面的监听可能晚于 load 事件注册，补发一次（聚焦是幂等的）
       if (pendingNode) resendTimer = setTimeout(postFocus, 600);
     });
-    frame.src = g.id + '.html';
+    frame.src = g.html || (g.id + '.html');
     stage.appendChild(frame);
   }
 

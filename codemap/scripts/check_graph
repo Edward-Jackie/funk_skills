@@ -16,6 +16,8 @@ from typing import Any
 
 import yaml
 
+import map_home
+
 
 ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -50,6 +52,9 @@ def git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 def find_root(path: Path) -> Path:
     probe = path if path.is_dir() else path.parent
+    mapped = map_home.project_root_from_map(probe)
+    if mapped is not None:
+        return mapped
     result = git(probe, "rev-parse", "--show-toplevel")
     return Path(result.stdout.strip()).resolve() if result.returncode == 0 else Path.cwd().resolve()
 
@@ -114,6 +119,7 @@ class Validator:
         self.map_dir = map_dir
         self.graph_dir = self.map_dir / "graphs"
         self.view_dir = self.map_dir / "views"
+        self.map_repo = map_home.git_root(self.map_dir)
         self.strict = strict
         self.skip_view_check = skip_view_check
         self.errors: list[str] = []
@@ -131,10 +137,22 @@ class Validator:
         self.warnings.append(f"{self.rel(file)}: {message}")
 
     def rel(self, path: Path) -> str:
+        for base in (self.map_dir, self.root):
+            try:
+                return str(path.relative_to(base))
+            except ValueError:
+                continue
+        return str(path)
+
+    def tracked(self, path: Path) -> bool:
+        repo = self.map_repo or map_home.git_root(self.root)
+        if repo is None:
+            return False
         try:
-            return str(path.relative_to(self.root))
+            rel = path.resolve().relative_to(repo)
         except ValueError:
-            return str(path)
+            return False
+        return git(repo, "ls-files", "--error-unmatch", str(rel)).returncode == 0
 
     def load(self, file: Path) -> dict[str, Any] | None:
         try:
@@ -284,9 +302,9 @@ class Validator:
             self.error(file, f"verified_commit 不存在：{commit or '<空>'}")
             commit = ""
 
-        tracked = git(self.root, "ls-files", "--error-unmatch", self.rel(file)).returncode == 0
+        tracked = self.tracked(file)
         if not tracked:
-            self.warn(file, "Graph 尚未纳入 Git")
+            self.warn(file, "Graph 尚未纳入地图 Git 仓库")
 
         view_value = graph.get("view")
         if not isinstance(view_value, str) or not view_value.strip():
@@ -294,7 +312,7 @@ class Validator:
         else:
             view = (file.parent / view_value).resolve()
             if not inside(view, self.view_dir) or view.suffix != ".mmd":
-                self.error(file, f"view 必须位于 .map/views 且扩展名为 .mmd：{view_value}")
+                self.error(file, f"view 必须位于地图的 views/ 且扩展名为 .mmd：{view_value}")
             else:
                 self.views.add((self.rel(file), str(view.relative_to(self.map_dir))))
                 if not self.skip_view_check:
@@ -306,8 +324,8 @@ class Validator:
                         first_lines = "\n".join(view.read_text(encoding="utf-8", errors="ignore").splitlines()[:3])
                         if marker not in first_lines:
                             self.error(file, f"生成视图已过期，请运行 render_graph：{self.rel(view)}")
-                        if git(self.root, "ls-files", "--error-unmatch", self.rel(view)).returncode != 0:
-                            self.warn(file, f"生成视图尚未纳入 Git：{self.rel(view)}")
+                        if not self.tracked(view):
+                            self.warn(file, f"生成视图尚未纳入地图 Git 仓库：{self.rel(view)}")
 
         nodes = graph.get("nodes")
         edges = graph.get("edges")
@@ -397,7 +415,7 @@ class Validator:
             elif isinstance(sub, str):
                 sub_file = (file.parent / sub).resolve()
                 if not inside(sub_file, self.graph_dir) or sub_file.suffix not in {".yaml", ".yml"}:
-                    self.error(file, f"node {node_id} 的 sub 必须位于 .map/graphs：{sub}")
+                    self.error(file, f"node {node_id} 的 sub 必须位于地图的 graphs/：{sub}")
                 elif not sub_file.is_file():
                     self.error(file, f"node {node_id} 的 sub 文件不存在：{sub}")
                 else:

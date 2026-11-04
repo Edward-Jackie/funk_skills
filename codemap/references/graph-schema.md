@@ -7,8 +7,8 @@ Graph YAML 是关系结构的唯一事实源；Mermaid、Web Explorer 和 AI 上
 ## 文件位置
 
 ```text
-.map/graphs/<flow>.yaml
-.map/views/<flow>.mmd
+<map-root>/graphs/<flow>.yaml
+<map-root>/views/<domain>/<flow>.mmd
 ```
 
 文件名、Graph ID、节点 ID、边 ID 和泳道 ID 使用小写英文、数字和连字符。Summary 图最多 12 个节点，detail 图最多 18 个节点。
@@ -52,7 +52,7 @@ nodes:
     context:
       load: required           # required | optional
       markdown:
-        - path: .map/CODEMAP-billing.md
+        - path: <map-root>/CODEMAP-billing.md
           heading: 实时计费主链
     refs:
       - path: proxy/service/billing_service.go
@@ -164,7 +164,7 @@ cycles:
 
 ## ViewSpec 投影边界
 
-Graph 不保存渲染坐标、路由、主题、缩放或导出配置。需要固定一个人的阅读镜头时，使用 `.map/views/<name>.view.yaml` 的 `codemap.view/v1`：
+Graph 不保存渲染坐标、路由、主题、缩放或导出配置。需要固定一个人的阅读镜头时，使用 `<map-root>/views/<domain>/<name>.view.yaml` 的 `codemap.view/v1`：
 
 - 只能引用 Graph/Overlay ID、语义类型、当前布局、焦点、边类型过滤和质量上限。
 - 不得复制节点、边、条件、证据、refs 或 Markdown 正文。

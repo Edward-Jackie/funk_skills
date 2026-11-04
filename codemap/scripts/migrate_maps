@@ -1,0 +1,228 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["PyYAML>=6.0.2,<7"]
+# ///
+"""把项目内 .map/ 迁到 ~/.codemap/maps/<project>/<branch>/，并把视图按 domain 分组。
+
+迁移只复制事实与派生视图，不修改项目源码；--remove-legacy 会在成功复制后删除旧 .map/。
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+import yaml
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import map_home  # noqa: E402
+
+GITIGNORE = """\
+**/views/*/*.html
+**/views/*/*.json
+**/views/index.html
+**/.metrics/
+**/context/
+**/site/
+"""
+
+VIEW_FILE_RE = re.compile(r"^(?P<id>[a-z0-9][a-z0-9-]*)\.(?:html|mmd|candidate\.json|facts\.json|delivery\.json)$")
+VIEW_SPEC_RE = re.compile(r"^(?P<id>[a-z0-9][a-z0-9-]*)\.view\.yaml$")
+
+
+def git(path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(["git", *args], cwd=str(path), capture_output=True, text=True, check=False)
+
+
+def domain_slug(value: object) -> str:
+    raw = str(value or "uncategorized").strip().lower()
+    slug = re.sub(r"[^a-z0-9]+", "-", raw).strip("-")
+    return slug or "uncategorized"
+
+
+def graph_domains(map_dir: Path) -> dict[str, str]:
+    domains: dict[str, str] = {}
+    for path in sorted((map_dir / "graphs").glob("*.yaml")):
+        try:
+            data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError):
+            continue
+        if isinstance(data, dict) and isinstance(data.get("id"), str):
+            domains[data["id"]] = domain_slug(data.get("domain"))
+    return domains
+
+
+def view_specs(map_dir: Path, domains: dict[str, str]) -> dict[str, str]:
+    specs: dict[str, str] = {}
+    for path in sorted((map_dir / "views").rglob("*.view.yaml")):
+        try:
+            data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        spec_id = str(data.get("id") or path.stem.replace(".view", ""))
+        graph_id = str(data.get("graph") or "")
+        slug = domains.get(graph_id) or domain_slug(data.get("domain") or spec_id.split("-")[0])
+        specs[spec_id] = slug
+    return specs
+
+
+def rewrite_graph_views(map_dir: Path, domains: dict[str, str]) -> int:
+    changed = 0
+    for path in sorted((map_dir / "graphs").glob("*.yaml")):
+        try:
+            data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        graph_id = str(data.get("id") or "")
+        slug = domains.get(graph_id)
+        if not graph_id or not slug:
+            continue
+        text = path.read_text(encoding="utf-8")
+        new = f"view: ../views/{slug}/{graph_id}.mmd"
+        updated, count = re.subn(r"^view:\s*.*$", new, text, count=1, flags=re.M)
+        if count and updated != text:
+            path.write_text(updated, encoding="utf-8")
+            changed += 1
+    return changed
+
+
+def rewrite_references(map_dir: Path, domains: dict[str, str], specs: dict[str, str]) -> int:
+    changed = 0
+    for path in sorted(map_dir.glob("CODEMAP*.md")):
+        text = path.read_text(encoding="utf-8")
+        original = text
+        for graph_id, slug in domains.items():
+            for suffix in (".mmd",):
+                flat = f"views/{graph_id}{suffix}"
+                nested = f"views/{slug}/{graph_id}{suffix}"
+                if nested not in text:
+                    text = text.replace(flat, nested)
+        for spec_id, slug in specs.items():
+            flat = f"views/{spec_id}.view.yaml"
+            nested = f"views/{slug}/{spec_id}.view.yaml"
+            if nested not in text:
+                text = text.replace(flat, nested)
+        if text != original:
+            path.write_text(text, encoding="utf-8")
+            changed += 1
+    return changed
+
+
+def render_mermaid(map_dir: Path) -> int:
+    renderer = Path(__file__).resolve().parent / "render_graph"
+    rendered = 0
+    for path in sorted((map_dir / "graphs").glob("*.yaml")):
+        proc = subprocess.run([sys.executable, str(renderer), str(path)], capture_output=True, text=True, check=False)
+        if proc.returncode == 0:
+            rendered += 1
+        else:
+            print(f"! {path.name} Mermaid 生成失败：{proc.stderr.strip()[:160]}", file=sys.stderr)
+    return rendered
+
+
+def move_views(source: Path, target: Path, domains: dict[str, str], specs: dict[str, str]) -> int:
+    source_views = source / "views"
+    if not source_views.is_dir():
+        return 0
+    moved = 0
+    for path in sorted(source_views.iterdir()):
+        if not path.is_file() or path.name == "index.html":
+            continue
+        slug = ""
+        match = VIEW_SPEC_RE.match(path.name)
+        if match:
+            slug = specs.get(match.group("id"), "")
+        else:
+            match = VIEW_FILE_RE.match(path.name)
+            if match:
+                slug = domains.get(match.group("id"), "")
+        if not slug:
+            continue
+        destination = target / "views" / slug / path.name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if path.resolve() != destination.resolve():
+            shutil.copy2(path, destination)
+        moved += 1
+    return moved
+
+
+def ensure_git(home: Path) -> None:
+    home.mkdir(parents=True, exist_ok=True)
+    ignore = home / ".gitignore"
+    if not ignore.exists():
+        ignore.write_text(GITIGNORE, encoding="utf-8")
+    if not (home / ".git").is_dir():
+        git(home, "init")
+
+
+def migrate(root: Path, branch: str | None, remove_legacy: bool) -> dict[str, object]:
+    root = root.expanduser().resolve()
+    legacy = root / ".map"
+    current = map_home.resolve(root, branch)
+    if not legacy.is_dir() and not current.exists:
+        return {"root": str(root), "status": "skipped", "reason": "没有 .map 或 map home 地图"}
+
+    source = legacy if legacy.is_dir() else current.map_dir
+    location = map_home.ensure(root, branch, copy_from=legacy if legacy.is_dir() else None)
+    target = location.map_dir
+    domains = graph_domains(target)
+    specs = view_specs(source, domains)
+    graphs = rewrite_graph_views(target, domains)
+    refs = rewrite_references(target, domains, specs)
+    views = move_views(source, target, domains, specs)
+    mermaid = render_mermaid(target)
+    ensure_git(map_home.MAPS_HOME)
+
+    if remove_legacy and legacy.is_dir() and legacy.resolve() != target.resolve():
+        shutil.rmtree(legacy)
+
+    return {
+        "root": str(root),
+        "status": "migrated",
+        "source": str(source),
+        "map_dir": str(target),
+        "branch": location.branch,
+        "project": location.project,
+        "graphs_updated": graphs,
+        "files_updated": refs,
+        "views_copied": views,
+        "mermaid_rendered": mermaid,
+        "legacy_removed": bool(remove_legacy and not legacy.exists()),
+        "gitignore": str(map_home.MAPS_HOME / ".gitignore"),
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--root", action="append", type=Path, required=True, help="项目根，可重复")
+    parser.add_argument("--branch", help="目标分支；默认取项目当前分支")
+    parser.add_argument("--remove-legacy", action="store_true", help="复制完成后删除项目内 .map/")
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args()
+
+    results = [migrate(root, args.branch, args.remove_legacy) for root in args.root]
+    if args.json:
+        print(json.dumps(results, ensure_ascii=False, indent=2))
+    else:
+        for item in results:
+            print(
+                f"{item['status']}: {item['root']}"
+                + (f" -> {item['map_dir']}" if item.get("map_dir") else "")
+                + (f"（{item.get('reason')}）" if item.get("reason") else "")
+            )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

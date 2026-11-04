@@ -16,24 +16,24 @@ Codemap 同时支持“需求找代码”和“代码改动反查业务”。反
 检查暂存区、工作区和未跟踪文件：
 
 ```bash
-scripts/impact_diff .map/graphs
+scripts/impact_diff <map-root>/graphs
 ```
 
 包含某个基线到当前 `HEAD` 的提交差异：
 
 ```bash
-scripts/impact_diff .map/graphs --base origin/main --depth 2
+scripts/impact_diff <map-root>/graphs --base origin/main --depth 2
 ```
 
 只分析明确文件：
 
 ```bash
-scripts/impact_diff .map/graphs \
+scripts/impact_diff <map-root>/graphs \
   --path proxy/service/billing_service.go \
   --path api/job/commission_daily.go
 ```
 
-通过 `--out .map/context/change-impact.md` 保存临时结果。该文件不是真源，默认不提交。
+通过 `--out <map-root>/context/change-impact.md` 保存临时结果。该文件不是真源，默认不提交。
 
 ## 命中规则
 

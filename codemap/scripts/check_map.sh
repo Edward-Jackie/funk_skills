@@ -6,6 +6,8 @@ set -uo pipefail
 STRICT=0
 AGE=0
 MAP_ROOT=""
+ROOT_ARG=""
+BRANCH_ARG=""
 INDEX_ARG=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -16,6 +18,16 @@ while [ "$#" -gt 0 ]; do
     --age)
       AGE=1
       shift
+      ;;
+    --root)
+      [ "$#" -ge 2 ] || { echo "--root 缺少项目根目录" >&2; exit 2; }
+      ROOT_ARG="$2"
+      shift 2
+      ;;
+    --branch)
+      [ "$#" -ge 2 ] || { echo "--branch 缺少分支名" >&2; exit 2; }
+      BRANCH_ARG="$2"
+      shift 2
       ;;
     --map-root)
       [ "$#" -ge 2 ] || { echo "--map-root 缺少目录" >&2; exit 2; }
@@ -34,23 +46,43 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-INDEX="${INDEX_ARG:-${MAP_ROOT:-.map}/CODEMAP.md}"
-[ -f "$INDEX" ] || { echo "CODEMAP 不存在：$INDEX" >&2; exit 1; }
-
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
-MAP_DIR="$(cd "$(dirname "$INDEX")" && pwd -P)"
-INDEX_ABS="$MAP_DIR/$(basename "$INDEX")"
-ROOT_RAW="$(git -C "$MAP_DIR" rev-parse --show-toplevel 2>/dev/null || pwd -P)"
-ROOT="$(cd "$ROOT_RAW" && pwd -P)"
-if [ -n "$MAP_ROOT" ]; then
-  case "$MAP_ROOT" in
-    /*) EXPECTED_INDEX="$MAP_ROOT/CODEMAP.md" ;;
-    *) EXPECTED_INDEX="$ROOT/$MAP_ROOT/CODEMAP.md" ;;
-  esac
-else
-  EXPECTED_INDEX="$ROOT/.map/CODEMAP.md"
+
+if [ -n "$ROOT_ARG" ]; then
+  ROOT="$(cd "$ROOT_ARG" && pwd -P)"
 fi
-EXPECTED_INDEX="$(cd "$(dirname "$EXPECTED_INDEX")" && pwd -P)/CODEMAP.md"
+
+if [ -n "$INDEX_ARG" ]; then
+  MAP_DIR="$(cd "$(dirname "$INDEX_ARG")" && pwd -P)"
+elif [ -n "$MAP_ROOT" ]; then
+  case "$MAP_ROOT" in
+    /*) MAP_DIR="$MAP_ROOT" ;;
+    *) MAP_DIR="${ROOT:-$PWD}/$MAP_ROOT" ;;
+  esac
+  MAP_DIR="$(cd "$MAP_DIR" && pwd -P)"
+elif [ -n "$ROOT" ]; then
+  resolved="$("$SCRIPT_DIR/map_home.py" resolve --root "$ROOT" ${BRANCH_ARG:+--branch "$BRANCH_ARG"})" \
+    || { echo "找不到地图目录：$ROOT" >&2; exit 1; }
+  MAP_DIR="$(printf '%s\n' "$resolved" | sed -n 's/^map_dir: //p')"
+  [ -n "$MAP_DIR" ] || { echo "无法解析地图目录：$ROOT" >&2; exit 1; }
+else
+  MAP_DIR="$(cd .map && pwd -P)"
+fi
+
+if [ -z "${ROOT:-}" ]; then
+  ROOT="$("$SCRIPT_DIR/map_home.py" root --map-root "$MAP_DIR" 2>/dev/null || true)"
+fi
+if [ -z "${ROOT:-}" ] || [ ! -d "$ROOT" ]; then
+  ROOT_RAW="$(git -C "$MAP_DIR" rev-parse --show-toplevel 2>/dev/null || pwd -P)"
+  ROOT="$(cd "$ROOT_RAW" && pwd -P)"
+fi
+
+INDEX="$MAP_DIR/CODEMAP.md"
+[ -f "$INDEX" ] || { echo "CODEMAP 不存在：$INDEX" >&2; exit 1; }
+INDEX_ABS="$INDEX"
+EXPECTED_INDEX="$INDEX_ABS"
+MAP_REPO="$(git -C "$MAP_DIR" rev-parse --show-toplevel 2>/dev/null || true)"
+
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/codemap-check.XXXXXX")"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
@@ -137,7 +169,7 @@ done < "$FILES_LIST"
 
 echo "== 结构与证据 =="
 while IFS= read -r file; do
-  rel="${file#$ROOT/}"
+  rel="${file#$MAP_DIR/}"
   base="$(basename "$file")"
   role="$(meta_value "$file" map-role)"
   mode="$(meta_value "$file" map-mode)"
@@ -173,7 +205,12 @@ while IFS= read -r file; do
     commit=""
   fi
 
-  if ! git -C "$ROOT" ls-files --error-unmatch "$rel" >/dev/null 2>&1; then
+  if [ -n "$MAP_REPO" ]; then
+    map_rel="${file#$MAP_REPO/}"
+    if ! git -C "$MAP_REPO" ls-files --error-unmatch "$map_rel" >/dev/null 2>&1; then
+      strict_warn "$rel 尚未纳入地图 Git 仓库"
+    fi
+  elif ! git -C "$ROOT" ls-files --error-unmatch "$rel" >/dev/null 2>&1; then
     strict_warn "$rel 尚未纳入 Git"
   fi
 

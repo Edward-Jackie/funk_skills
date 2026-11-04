@@ -3,7 +3,13 @@
 
 set -uo pipefail
 
-DIR="${1:-.map}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
+if [ -n "${1:-}" ]; then
+  DIR="$1"
+else
+  DIR="$("$SCRIPT_DIR/map_home.py" resolve --root . 2>/dev/null | sed -n 's/^map_dir: //p')"
+  [ -n "$DIR" ] || DIR=".map"
+fi
 INDEX_LIMIT="${2:-120}"
 DOMAIN_LIMIT="${3:-240}"
 

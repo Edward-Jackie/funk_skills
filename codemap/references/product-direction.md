@@ -1,6 +1,6 @@
 # 改造方向与分层契约
 
-> 当前基线版本：**Codemap 3.1**（事实层沿用 Graph v2，渲染层为内置 Archify 3.2 分支）
+> 当前基线版本：**Codemap 4.0**（事实层沿用 Graph v2，渲染层为内置 Archify 3.2 分支）
 
 Codemap 首先是 AI 的项目认知层，其次才是人的可视化入口。改造先冻结职责和信息流，再从源码生成地图；旧地图不能成为新版设计约束。
 
@@ -10,14 +10,23 @@ Codemap 首先是 AI 的项目认知层，其次才是人的可视化入口。�
 
 | 版本 | 状态 | 范围 | 定调 |
 |---|---|---|---|
-| v3.0 | 已交付 | Markdown + Graph v2 + 内置 Archify 渲染、下钻外壳、`query_graph`、`impact_diff` | 当前基线；Explorer 已退役 |
-| v3.1 | 进行中（①④ 已落地，② 部分） | ① 新鲜度守卫（过期分级、可失败、读取前警告）② 收益度量（M1 命中日志 / M4 过期比例）③ 页面级五层锚点 ④ MCP 只读取数层 | **只改校验、采集与取数层，不碰渲染链** |
+| v3.0 | 已交付 | Markdown + Graph v2 + 内置 Archify 渲染、下钻外壳、`query_graph`、`impact_diff` | 历史基线；Explorer 已退役 |
+| v3.1 | 已交付（S2 未投入） | ① 新鲜度守卫（过期分级、可失败、读取前警告）② 收益度量（M1 命中日志 / M4 过期比例）③ 页面级五层锚点 ④ MCP 只读取数层 | **只改校验、采集与取数层，不碰渲染链** |
+| v4.0 | 已交付 | 地图迁到 `~/.codemap/maps/<project>/<branch>`；单 Git 仓库；views 按 domain 分组；MCP 与脚本统一解析 | 破坏性布局变更；旧 `.map/` 只读回退 |
 | v3.2 | 未开工 | 画布批注图层、Overlay 三镜头渲染、viewer 补丁层扩展 | 讨论层；开工前须先验证侧车方案 U1 |
+
+### v4.0 地图布局
+
+- 事实按项目 + 代码分支全量存放：`~/.codemap/maps/<project>/<branch>/`；一个私有 Git 仓库统管所有项目。
+- `views/` 按 Graph 的 `domain` 分组：`views/<domain>/<flow>.*`；Graph 的 `view` 指向 `../views/<domain>/<flow>.mmd`。
+- 事实、Mermaid 与 `.view.yaml` 入库；HTML、candidate/facts/delivery JSON、context、site、metrics 不入库。
+- 分支目录缺失时回退默认分支并明确提示；项目内旧 `.map/` 只作为只读回退，迁移用 `scripts/migrate_maps`。
+- 解析单一入口：Python 用 `map_home.py`，shell 用 `check_map.sh --root`；禁止脚本各自拼 `.map`。
 
 ### v3.1 顺序（依赖关系，不可跳步）
 
 1. **新鲜度守卫（前置，不可跳过）**：`verified_commit` 之外补"HEAD 领先多少提交/多少天"、锚点失效分级、`query_graph` 输出前置过期横幅。现状只有逐文件 `strict_warn`，不加 `--strict` 退出码仍为 0，等于不阻断。
-2. **收益度量**：命中率、定位耗时、修图成本、过期比例只写本地 `.map/.metrics/`，不上报不阻塞。
+2. **收益度量**：命中率、定位耗时、修图成本、过期比例只写地图目录的 `.metrics/`，不上报不阻塞。
 3. **页面级锚点**：配置页/表单页记录 `route → View → Panel/组件 → API → service` 五层，复用 `path -> symbol` 锚点格式。投入大小由第 2 步数据决定，列表页与纯 CRUD 不建。
 4. **MCP 只读取数层**：见下节边界。
 
@@ -27,7 +36,7 @@ Codemap 首先是 AI 的项目认知层，其次才是人的可视化入口。�
 - 力导向发现图、提交钩子自动更新、`state`/`force` 布局。
 - Graph 的 `rules` 字段已透传到侧车，但 `check_graph` 尚未校验它。
 
-### MCP 边界（v3.1）
+### MCP 边界（v4.0）
 
 MCP 只包装同一套 Core，**只读、不写、不缓存第二份状态**：
 
@@ -101,10 +110,10 @@ Graph / Overlay → ViewSpec → 临时 IR → HTML / SVG / 浏览器回执
 ## Clean Break 重建
 
 1. 冻结 Markdown 模板、Graph v2、Overlay 和工具行为。
-2. 在隔离目录 `.map/next/` 选择一个真实高风险领域，从源码重新取证并生成完整样板。
+2. 在隔离目录 `<map-root>/next/` 选择一个真实高风险领域，从源码重新取证并生成完整样板。
 3. 同时验收 AI 查询质量和人的可视化质量；不能只看页面是否好看。
 4. 根据样板修正规范和工具，而不是迁就旧文件。
-5. 用户确认后，按领域从源码批量重建；最后再决定是否替换 `.map/`。
+5. 用户确认后，按领域从源码批量重建；最后再决定是否替换 `<map-root>`。
 
 旧 Graph 不兼容、不混读、不自动升级。旧 Markdown 只可用于发现可能遗漏的问题，任何结论都要重新取证。
 

@@ -15,11 +15,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from freshness_lib import LEVELS, SEVERITY, compute, find_root, render_text  # noqa: E402
+import map_home  # noqa: E402
 
 
-def map_dir_of(path: Path | None, root: Path) -> Path:
+def map_dir_of(path: Path | None, root: Path, branch: str | None = None) -> Path:
     if path is None:
-        return root / ".map"
+        return map_home.resolve(root, branch).map_dir
     target = path.expanduser().resolve()
     if target.is_file():
         target = target.parent
@@ -30,9 +31,10 @@ def map_dir_of(path: Path | None, root: Path) -> Path:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("path", nargs="?", type=Path, help="CODEMAP.md、.map 目录或 Graph 目录；默认 <root>/.map")
-    parser.add_argument("--root", type=Path, help="项目根目录；默认自动识别 Git 根")
+    parser.add_argument("path", nargs="?", type=Path, help="CODEMAP.md、地图目录或 Graph 目录；默认按项目当前分支解析")
+    parser.add_argument("--root", type=Path, help="项目根目录；默认自动识别 Git 根或 map home 的 repo.json")
     parser.add_argument("--map-root", type=Path, help="地图根目录，优先于 path")
+    parser.add_argument("--branch", help="目标分支；默认取项目当前分支")
     parser.add_argument("--deep", action="store_true", help="用 where.sh 校验符号是否仍有定义式匹配")
     parser.add_argument("--no-anchors", action="store_true", help="跳过锚点扫描，只看元数据与领先度")
     parser.add_argument("--json", action="store_true", help="输出 JSON")
@@ -41,7 +43,7 @@ def main() -> int:
 
     probe = args.map_root.expanduser().resolve() if args.map_root else (args.path.expanduser().resolve() if args.path else Path.cwd())
     root = args.root.expanduser().resolve() if args.root else find_root(probe)
-    map_dir = map_dir_of(args.map_root or args.path, root)
+    map_dir = map_dir_of(args.map_root or args.path, root, args.branch)
     if not map_dir.is_dir():
         print(f"地图目录不存在：{map_dir}", file=sys.stderr)
         return 2

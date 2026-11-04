@@ -16,7 +16,7 @@ Graph / Markdown / Overlay
 
 ## ViewSpec 的职责
 
-ViewSpec 只声明“从哪张图、用什么语义和镜头阅读”，不能复制节点、边、规则、源码锚点或坐标。它适合放在 `.map/views/<name>.view.yaml`，也可以只在临时目录生成。
+ViewSpec 只声明“从哪张图、用什么语义和镜头阅读”，不能复制节点、边、规则、源码锚点或坐标。它适合放在 `<map-root>/views/<domain>/<name>.view.yaml`，也可以只在临时目录生成。
 
 ```yaml
 schema: codemap.view/v1

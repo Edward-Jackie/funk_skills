@@ -39,7 +39,7 @@ echo "By extension:"
 printf '%s\n' "$files" | grep -oE "$EXT" | sort | uniq -c | sort -rn
 echo
 if [ "$count" -le 50 ]; then
-  echo "Layering hint: <=50 files may fit one .map/CODEMAP.md if business complexity and the 120-line budget also fit."
+  echo "Layering hint: <=50 files may fit one CODEMAP.md in the map home if business complexity and the 120-line budget also fit."
 else
-  echo "Layering hint: >50 files usually needs .map/CODEMAP-<domain>.md packages."
+  echo "Layering hint: >50 files usually needs CODEMAP-<domain>.md packages in the map home."
 fi

@@ -101,7 +101,7 @@ verified-commit: 0123456789abcdef
 - `check_map.sh --age` 对 `needs-review`、`stale`、`conflict` 直接判失败，并提示更新 `status` 与 `verified-commit`；`aging` 只告警。
 - `query_graph` / `impact_diff` 在地图非 `fresh` 时先输出新鲜度横幅，但**仍返回锚点结果**：过期不阻断读取，只阻断确定语气。
 - MCP 响应必须携带 `freshness` 信封；`level != fresh` 时附 `disclaimer`，`hits` 为空时给 `empty_reason`。
-- M4 过期比例 = 有问题的锚点数 / 锚点总数；M1 命中日志写入 `.map/.metrics/query.jsonl`，两者都只留本地。
+- M4 过期比例 = 有问题的锚点数 / 锚点总数；M1 命中日志写入 `<map-root>/.metrics/query.jsonl`，两者都只留本地。
 
 ## 冲突
 

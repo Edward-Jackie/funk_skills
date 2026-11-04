@@ -1,6 +1,6 @@
 # 交互视图与需求覆盖层
 
-> **3.0 说明**：Explorer 前端与 `render_web` 已退役，下文凡提到 Explorer、`render_web`、`.map/site/` 的渲染部分均不再可用。本文仍有效的是 Overlay 的数据契约和 `query_graph` 上下文查询；Overlay 的三镜头渲染尚未在 Archify 渲染链路里实现（见 [Archify 集成](archify-integration.md)）。可下钻、可检索的视图改用 `scripts/build_views`。
+> **3.0 说明**：Explorer 前端与 `render_web` 已退役，下文凡提到 Explorer、`render_web`、`<map-root>/site/` 的渲染部分均不再可用。本文仍有效的是 Overlay 的数据契约和 `query_graph` 上下文查询；Overlay 的三镜头渲染尚未在 Archify 渲染链路里实现（见 [Archify 集成](archify-integration.md)）。可下钻、可检索的视图改用 `scripts/build_views`。
 
 Codemap 的 Markdown 和 Graph 保存事实，Web Explorer 只负责展示。任何视觉布局、筛选结果和临时需求图都不得反向改写基础事实。
 
@@ -18,12 +18,12 @@ Codemap 的 Markdown 和 Graph 保存事实，Web Explorer 只负责展示。任
 
 ## ViewSpec 与类型化投影
 
-需要复用某个阅读镜头时，使用 `.map/views/<name>.view.yaml` 保存 ViewSpec，不要复制一份节点和边。ViewSpec 只声明 Graph、Overlay、语义类型、当前布局、焦点和边过滤；完整字段与限制见 [类型化视图编译契约](view-compiler.md)。
+需要复用某个阅读镜头时，使用 `<map-root>/views/<domain>/<name>.view.yaml` 保存 ViewSpec，不要复制一份节点和边。ViewSpec 只声明 Graph、Overlay、语义类型、当前布局、焦点和边过滤；完整字段与限制见 [类型化视图编译契约](view-compiler.md)。
 
 ```bash
-scripts/render_web .map/graphs \
-  --view .map/views/billing-workflow.view.yaml \
-  --overlay .map/overlays/api-key-daily-quota.yaml \
+scripts/render_web <map-root>/graphs \
+  --view <map-root>/views/<domain>/billing-workflow.view.yaml \
+  --overlay <map-root>/overlays/api-key-daily-quota.yaml \
   --open
 ```
 
@@ -55,7 +55,7 @@ scripts/render_web .map/graphs \
 
 ## 需求 Overlay
 
-未实施需求使用 `.map/overlays/<task>.yaml`：
+未实施需求使用 `<map-root>/overlays/<task>.yaml`：
 
 ```yaml
 schema: codemap.overlay/v1
@@ -122,11 +122,11 @@ Overlay 必须保持 `status: proposal`，且新增节点和边使用 `unverifie
 ## AI 上下文查询
 
 ```bash
-scripts/query_graph .map/graphs \
+scripts/query_graph <map-root>/graphs \
   --query "API Key 每日额度" \
   --depth 2 \
-  --overlay .map/overlays/api-key-daily-quota.yaml \
-  --out .map/context/api-key-daily-quota.md
+  --overlay <map-root>/overlays/api-key-daily-quota.yaml \
+  --out <map-root>/context/api-key-daily-quota.md
 ```
 
 查询器按标题、描述、标签、Markdown 章节和源码锚点选种子，再沿边扩展有限深度。输出应包含：
@@ -142,12 +142,12 @@ scripts/query_graph .map/graphs \
 ## 本地 Explorer
 
 ```bash
-scripts/render_web .map/graphs \
-  --overlay .map/overlays/api-key-daily-quota.yaml \
+scripts/render_web <map-root>/graphs \
+  --overlay <map-root>/overlays/api-key-daily-quota.yaml \
   --open
 ```
 
-默认生成 `.map/site/index.html`，不启动服务、不访问网络。Explorer 至少提供：
+默认生成 `<map-root>/site/index.html`，不启动服务、不访问网络。Explorer 至少提供：
 
 - Graph 搜索与切换。
 - 按“领域 → 业务/服务视角 → 总图/分图”组织左侧菜单，需求 Overlay 单独放在“需求方案”。

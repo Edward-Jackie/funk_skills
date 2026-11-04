@@ -2,7 +2,7 @@
 
 创建新地图或重构导航结构时使用。日常只改命中任务的条目，不要每次套完整模板。
 
-## L1：`.map/CODEMAP.md`
+## L1：`<map-root>/CODEMAP.md`
 
 ```markdown
 # <项目名> Code Map
@@ -46,7 +46,7 @@ verified-commit: <Git commit>
 
 L1 只负责路由。详细调用链、业务说明和历史不要塞进 L1。
 
-## L2：`.map/CODEMAP-<domain>.md`
+## L2：`<map-root>/CODEMAP-<domain>.md`
 
 ```markdown
 # <领域> Code Map

@@ -14,6 +14,8 @@ from typing import Any
 
 import yaml
 
+import map_home
+
 SCHEMA = "codemap.freshness/v1"
 LEVELS = ("fresh", "aging", "needs-review", "stale", "conflict")
 SEVERITY = {level: index for index, level in enumerate(LEVELS)}
@@ -93,6 +95,9 @@ def git(root: Path, *args: str, timeout: int = 20) -> subprocess.CompletedProces
 
 def find_root(path: Path) -> Path:
     probe = path if path.is_dir() else path.parent
+    mapped = map_home.project_root_from_map(probe)
+    if mapped is not None:
+        return mapped
     result = git(probe, "rev-parse", "--show-toplevel")
     return Path(result.stdout.strip()).resolve() if result.returncode == 0 else Path.cwd().resolve()
 

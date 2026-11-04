@@ -19,6 +19,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from freshness_lib import banner, compute  # noqa: E402
+import map_home  # noqa: E402
 
 
 GRAPH_SCHEMA = "codemap.graph/v2"
@@ -36,6 +37,9 @@ def git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 def find_root(path: Path) -> Path:
     probe = path if path.is_dir() else path.parent
+    mapped = map_home.project_root_from_map(probe)
+    if mapped is not None:
+        return mapped
     result = git(probe, "rev-parse", "--show-toplevel")
     if result.returncode != 0:
         raise ValueError(f"无法从 {probe} 找到 Git 仓库")
@@ -324,7 +328,7 @@ def render_report(
             [
                 "## Graph 命中",
                 "",
-                "没有变更文件命中 Graph 的源码锚点。请回到 `.map/CODEMAP.md` 或源码搜索，不要解释为没有业务影响。",
+                "没有变更文件命中 Graph 的源码锚点。请回到地图的 CODEMAP.md（~/.codemap/maps 或旧 .map/）或源码搜索，不要解释为没有业务影响。",
                 "",
             ]
         )
