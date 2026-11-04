@@ -48,6 +48,7 @@ done
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
 
+# 地图可能来自 ~/.codemap/maps 或旧项目内 .map；先确定 MAP_DIR，再从 repo.json 反查项目根。
 if [ -n "$ROOT_ARG" ]; then
   ROOT="$(cd "$ROOT_ARG" && pwd -P)"
 fi
@@ -205,6 +206,7 @@ while IFS= read -r file; do
     commit=""
   fi
 
+  # 地图事实现在跟踪在地图仓库里，不再要求进入项目源码仓库。
   if [ -n "$MAP_REPO" ]; then
     map_rel="${file#$MAP_REPO/}"
     if ! git -C "$MAP_REPO" ls-files --error-unmatch "$map_rel" >/dev/null 2>&1; then

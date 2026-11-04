@@ -75,6 +75,7 @@ def sanitize(value: str) -> str:
 
 
 def branch_dir(branch: str) -> str:
+    """把 code branch 映射成安全目录名；`feature/x` -> `feature__x`，避免多一层目录。"""
     return sanitize(branch.replace("/", "__"))
 
 
@@ -98,6 +99,7 @@ def default_branch(root: Path) -> str:
 
 
 def repo_id(root: Path) -> str:
+    """用根提交 sha 前 16 位标识仓库；重新 clone / worktree 仍能认出同一个项目。"""
     roots = git(root, "rev-list", "--max-parents=0", "HEAD").stdout.split()
     return min(roots)[:16] if roots else ""
 
@@ -131,6 +133,7 @@ def read_meta(root: Path) -> dict[str, Any]:
 
 
 def write_meta(root: Path, branch: str | None = None) -> dict[str, Any]:
+    """写入项目级 repo.json；root 是项目源码路径，用于后续按分支反查和算新鲜度。"""
     home = repo_home(root)
     home.mkdir(parents=True, exist_ok=True)
     meta = read_meta(root)
@@ -158,7 +161,11 @@ def home_branch(root: Path, branch: str) -> Path:
 
 
 def project_root_from_map(map_dir: Path) -> Path | None:
-    """地图位于 ~/.codemap/maps/<project>/<branch> 时，从同项目 repo.json 取项目根。"""
+    """地图位于 ~/.codemap/maps/<project>/<branch> 时，从同项目 repo.json 取项目根。
+
+    map_dir 可能是 branch 目录，也可能是它的 graphs/ 子目录，所以向上最多找 4 层；
+    只接受 map home 内的 repo.json，避免误读其他仓库的配置。
+    """
     map_dir = map_dir.expanduser().resolve()
     if MAPS_HOME.resolve() not in map_dir.parents:
         return None
@@ -187,6 +194,7 @@ def git_root(path: Path) -> Path | None:
 
 
 def resolve(root: Path, branch: str | None = None, explicit: Path | str | None = None) -> Location:
+    """按优先级定位地图：显式路径 > 当前分支 > 默认分支回退 > 旧项目内 .map。"""
     root = Path(root).expanduser().resolve()
     meta = read_meta(root)
     branch = branch or current_branch(root)
@@ -225,6 +233,7 @@ def fact_files(source: Path) -> list[Path]:
 
 
 def ensure(root: Path, branch: str | None = None, copy_from: Path | None = None) -> Location:
+    """创建分支目录并写 repo.json；copy_from 只复制事实，不复制 views/metrics。"""
     root = Path(root).expanduser().resolve()
     branch = branch or current_branch(root)
     meta = write_meta(root, branch)
@@ -247,6 +256,7 @@ def ensure(root: Path, branch: str | None = None, copy_from: Path | None = None)
 
 
 def iter_projects() -> list[dict[str, Any]]:
+    """扫描 map home 下的 repo.json，返回项目名、根路径和实际存在的分支目录。"""
     projects: list[dict[str, Any]] = []
     if not MAPS_HOME.is_dir():
         return projects

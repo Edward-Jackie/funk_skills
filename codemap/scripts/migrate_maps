@@ -76,6 +76,7 @@ def view_specs(map_dir: Path, domains: dict[str, str]) -> dict[str, str]:
 
 
 def rewrite_graph_views(map_dir: Path, domains: dict[str, str]) -> int:
+    """把 Graph 的 view 指向 views/<domain>/；只改这一行，保留 YAML 其余格式。"""
     changed = 0
     for path in sorted((map_dir / "graphs").glob("*.yaml")):
         try:
@@ -98,6 +99,7 @@ def rewrite_graph_views(map_dir: Path, domains: dict[str, str]) -> int:
 
 
 def rewrite_references(map_dir: Path, domains: dict[str, str], specs: dict[str, str]) -> int:
+    """同步 CODEMAP 里的 .mmd 和 .view.yaml 链接，避免迁移后链接指向旧扁平路径。"""
     changed = 0
     for path in sorted(map_dir.glob("CODEMAP*.md")):
         text = path.read_text(encoding="utf-8")
@@ -120,6 +122,7 @@ def rewrite_references(map_dir: Path, domains: dict[str, str], specs: dict[str, 
 
 
 def render_mermaid(map_dir: Path) -> int:
+    """重写 Graph 的 view 行会改变 source-sha256，所以迁移后必须重生成 .mmd。"""
     renderer = Path(__file__).resolve().parent / "render_graph"
     rendered = 0
     for path in sorted((map_dir / "graphs").glob("*.yaml")):
@@ -132,6 +135,7 @@ def render_mermaid(map_dir: Path) -> int:
 
 
 def move_views(source: Path, target: Path, domains: dict[str, str], specs: dict[str, str]) -> int:
+    """按图 ID 找 domain，把旧 views/ 下的派生文件复制到 views/<domain>/。"""
     source_views = source / "views"
     if not source_views.is_dir():
         return 0
@@ -158,6 +162,7 @@ def move_views(source: Path, target: Path, domains: dict[str, str], specs: dict[
 
 
 def ensure_git(home: Path) -> None:
+    """初始化地图仓库并写入 .gitignore；HTML/JSON/metrics 不入库。"""
     home.mkdir(parents=True, exist_ok=True)
     ignore = home / ".gitignore"
     if not ignore.exists():
@@ -167,6 +172,7 @@ def ensure_git(home: Path) -> None:
 
 
 def migrate(root: Path, branch: str | None, remove_legacy: bool) -> dict[str, object]:
+    """迁移一个项目：复制事实 → 改写引用 → 分组视图 → 重生成 Mermaid → 可选删旧目录。"""
     root = root.expanduser().resolve()
     legacy = root / ".map"
     current = map_home.resolve(root, branch)
