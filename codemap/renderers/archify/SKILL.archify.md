@@ -104,7 +104,7 @@ When reporting verification details, distinguish artifact checks, browser eviden
 
 ## Optional viewer capabilities
 
-Live motion is enabled by default for every rendered diagram; omit `meta.animation`. The Viewer’s Live/Still button controls playback.
+Live/Still motion is available for every rendered diagram and starts in Still; omit `meta.animation`. The Viewer’s Live/Still button controls playback.
 
 Read `references/viewer-runtime.md` only when the user explicitly asks for Share Cards, Route/Reach cards, motion, deep links, presentation, search/focus, or another Viewer Runtime feature.
 
