@@ -7961,14 +7961,9 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         }
       }
 
-      function readStored() {
-        try { return localStorage.getItem(STORAGE_KEY); } catch (_) { return null; }
-      }
       function writeStored() {
-        try {
-          if (readerPaused) localStorage.removeItem(STORAGE_KEY);
-          else localStorage.setItem(STORAGE_KEY, 'live');
-        } catch (_) {}
+        // 默认状态固定 Still，不保存 Live 偏好，避免其他页面被上次选择带跑。
+        try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
       }
       function reducedMotion() {
         return !!(motionQuery && motionQuery.matches);
@@ -8117,7 +8112,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       createFlows();
       html.setAttribute('data-motion-capable', 'true');
       btn.hidden = false;
-      // 地图页每次打开都从 Still 开始；上次的 Live 偏好不再覆盖默认状态。
+      // 地图页每次打开都从 Still 开始；清掉历史 Live 偏好，避免旧页面读回。
+      try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
       readerPaused = true;
       btn.addEventListener('click', function () { setPaused(!readerPaused); });
       if (motionQuery) {
