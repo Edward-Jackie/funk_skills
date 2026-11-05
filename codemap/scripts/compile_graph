@@ -202,6 +202,28 @@ def sibling_title(base_dir: Path, graph_id: str) -> str:
         return graph_id
 
 
+def sibling_meta(base_dir: Path, graph_id: str) -> dict:
+    """读取兄弟 Graph 的标题、类型、状态与规模，供下钻卡片标记使用。"""
+    path = base_dir / f"{graph_id}.yaml"
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return {"id": graph_id, "title": graph_id}
+    if not isinstance(data, dict):
+        return {"id": graph_id, "title": graph_id}
+    nodes = data.get("nodes")
+    edges = data.get("edges")
+    return {
+        "id": graph_id,
+        "title": str(data.get("title") or graph_id),
+        "kind": data.get("kind"),
+        "level": data.get("level"),
+        "status": data.get("status"),
+        "node_count": len(nodes) if isinstance(nodes, list) else 0,
+        "edge_count": len(edges) if isinstance(edges, list) else 0,
+    }
+
+
 def compile_graph(
     graph: dict, quality: str, repo_root: Path | None, base_dir: Path, sublabel_limit: int = SUBLABEL_LIMIT
 ) -> tuple[dict, dict]:
@@ -322,16 +344,22 @@ def compile_graph(
     if repo:
         candidate["meta"]["repository"] = repo
     titles: dict[str, str] = {}
+    graphs: dict[str, dict] = {}
+    def remember_sibling(gid: str) -> None:
+        meta = sibling_meta(base_dir, gid)
+        titles[gid] = str(meta.get("title") or gid)
+        graphs[gid] = meta
     for n in nodes:
         if n.get("sub"):
-            sid = Path(str(n["sub"])).stem
-            titles[sid] = sibling_title(base_dir, sid)
+            remember_sibling(Path(str(n["sub"])).stem)
     parent = graph.get("parent")
     if isinstance(parent, dict) and parent.get("graph"):
-        titles[parent["graph"]] = sibling_title(base_dir, parent["graph"])
+        remember_sibling(str(parent["graph"]))
+    graphs[str(graph["id"])] = sibling_meta(base_dir, str(graph["id"]))
     facts = {
         "schema": "codemap.facts/v1",
         "titles": titles,
+        "graphs": graphs,
         "graph": {
             "id": graph["id"],
             "title": graph.get("title"),

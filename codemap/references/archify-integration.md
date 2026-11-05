@@ -40,6 +40,7 @@ Archify 的 `deliver` 会把侧车随规格快照冻结，所以 `finalize` 的�
 {
   "schema": "codemap.facts/v1",
   "titles": { "<sub 或 parent 的图 ID>": "<标题>" },
+  "graphs": { "<图 ID>": { "id", "title", "kind", "level", "status", "node_count", "edge_count" } },
   "graph": { "id", "title", "domain", "summary", "kind", "level", "parent", "status", "verified_at", "verified_commit" },
   "nodes": { "<id>": { "kind", "level", "detail", "tags", "refs", "evidence", "context", "sub", "rules" } },
   "edges": { "<id>": { "kind", "label", "condition", "detail", "refs", "evidence", "rules" } }
@@ -47,6 +48,8 @@ Archify 的 `deliver` 会把侧车随规格快照冻结，所以 `finalize` 的�
 ```
 
 注入时转义 `<`、`>`、`&`、`{{`、U+2028/2029，避免破坏 HTML 和模板占位。
+
+带 `sub` 的节点会在卡片右下角注入 `↳ 下钻 N` 按钮（18px 高）：`N` 为子图节点数，用于提示信息密度；业务子图用暖色、`status=conflict` 子图用红色，按钮可点击直接进入子图。注入时会把卡片底部标签左对齐，给按钮让位。Passport 的下钻按钮同时展示子图节点数与关系数。
 
 ## 页面与外壳的通信
 
@@ -56,6 +59,20 @@ Archify 的 `deliver` 会把侧车随规格快照冻结，所以 `finalize` 的�
 | 外壳 → 图 | `{source:'codemap', type:'focus', node}` | iframe `load` 后发送，600ms 后补发一次（聚焦幂等） |
 
 两端都校验 `source` 字段，外壳还校验 `event.source` 必须是当前 iframe。页面不在 iframe 内时，下钻用 `location.href = '<graph>.html'`。外壳 hash 形如 `#/<graph-id>` 或 `#/<graph-id>/<node-id>`。
+
+## 布局与关系线门禁
+
+`build_views --strict-layout` 在渲染后运行 Archify 组合检查，以下问题直接判失败：
+
+| 问题码 | 含义 | 优先处理 |
+| --- | --- | --- |
+| `composition/proper-crossing` | 两条关系线交叉 | 调整泳道/层级，或拆图 |
+| `composition/ambiguous-corridor` | 两条关系线共享走廊，视觉上重叠 | 减少跨泳道边，或把同向依赖聚合为一个节点 |
+| `composition/arrowhead-collision` | 进入同一节点的箭头过近 | 合并重复入边，或拆分接收节点 |
+| `composition/label-route-clearance` | 边标签压线或被遮挡 | 调整标签位置或简化边 |
+| `composition/container-border-run` | 关系线贴着容器边框长距离走 | 调整泳道顺序或拆图 |
+
+关系线密度是图结构的信号，不是渲染参数问题。优先把一张图拆成「总览 + 2~3 张 detail」，或把多个同向依赖聚合为一个节点并在标签/事实侧车保留明细；不要为了少拆图继续加节点或加边。
 
 ## 补丁层改动清单（相对原版 Archify 3.2）
 

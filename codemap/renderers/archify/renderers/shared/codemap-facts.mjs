@@ -44,6 +44,18 @@ const STYLE = `
     .cm-cond { margin: 0 0 0.35rem; color: var(--text); font-weight: 700; }
     .cm-go { appearance: none; padding: 0.2rem 0.55rem; border: 1px solid color-mix(in srgb, var(--cloud-stroke) 55%, var(--toolbar-border)); border-radius: 999px; background: transparent; color: var(--cloud-stroke); font: inherit; font-size: 0.55rem; font-weight: 700; cursor: pointer; }
     .cm-go:hover, .cm-go:focus-visible { background: color-mix(in srgb, var(--cloud-stroke) 16%, transparent); outline: 2px solid var(--cloud-stroke); outline-offset: 1px; }
+    .cm-sub-badge { cursor: pointer; }
+    .cm-sub-badge rect { fill: color-mix(in srgb, var(--cloud-stroke) 24%, var(--panel)); stroke: color-mix(in srgb, var(--cloud-stroke) 80%, transparent); stroke-width: 1; }
+    .cm-sub-badge text { fill: var(--cloud-stroke); font-family: inherit; font-size: 8.5px; font-weight: 700; letter-spacing: 0; }
+    .cm-sub-badge.is-business rect { fill: color-mix(in srgb, var(--security-stroke, #f59e0b) 16%, var(--panel)); stroke: var(--security-stroke, #f59e0b); }
+    .cm-sub-badge.is-business text { fill: var(--security-stroke, #f59e0b); }
+    .cm-sub-badge.is-conflict rect { fill: color-mix(in srgb, #ef4444 16%, var(--panel)); stroke: #ef4444; }
+    .cm-sub-badge.is-conflict text { fill: #ef4444; }
+    .cm-sub-badge.is-dense rect { stroke-width: 1.3; }
+    .cm-sub-badge.is-dense text { font-weight: 800; }
+    .cm-drill .cm-go { background: color-mix(in srgb, var(--cloud-stroke) 14%, transparent); font-size: 0.6rem; }
+    .cm-drill.is-business .cm-go { border-color: var(--security-stroke, #f59e0b); color: var(--security-stroke, #f59e0b); background: color-mix(in srgb, var(--security-stroke, #f59e0b) 14%, transparent); }
+    .cm-drill.is-conflict .cm-go { border-color: #ef4444; color: #ef4444; background: color-mix(in srgb, #ef4444 14%, transparent); }
     .cm-crumb { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin: 0 0 0.5rem; font-size: 0.6rem; color: var(--text-muted); }
     html[data-embed="true"] .cm-crumb { display: none; }
 `;
@@ -63,6 +75,8 @@ const SCRIPT = `
 
   var graph = facts.graph || {};
   var titles = facts.titles || {};
+  var graphs = facts.graphs || {};
+  var SVG_NS = 'http://www.w3.org/2000/svg';
   var panel = document.createElement('div');
   panel.id = 'codemap-facts-panel';
   panel.className = 'cm-panel';
@@ -101,6 +115,64 @@ const SCRIPT = `
     b.type = 'button';
     b.addEventListener('click', function () { navigate(graphId, nodeId); });
     return b;
+  }
+  function subMeta(sub) {
+    var sid = subGraphId(sub);
+    return graphs[sid] || { title: titles[sid] || sid };
+  }
+  function markSubgraphs() {
+    if (!svg) return;
+    Object.keys(facts.nodes || {}).forEach(function (id) {
+      var fact = facts.nodes[id];
+      if (!fact || !fact.sub) return;
+      var g = svg.querySelector('[data-node-id="' + id + '"]');
+      if (!g || g.querySelector('.cm-sub-badge')) return;
+      var rect = g.querySelector('rect');
+      if (!rect) return;
+      var sid = subGraphId(fact.sub);
+      var meta = subMeta(fact.sub);
+      var count = meta.node_count || 0;
+      var kindLabel = meta.status === 'conflict' ? '冲突下钻' : (meta.kind === 'business' ? '业务下钻' : '下钻');
+      var label = '↳ ' + kindLabel + (count ? ' ' + count : '');
+      var width = Math.max(46, 12 + label.length * 7.2);
+      var rectX = +rect.getAttribute('x') || 0;
+      var rectY = +rect.getAttribute('y') || 0;
+      var rectW = +rect.getAttribute('width') || 0;
+      var rectH = +rect.getAttribute('height') || 0;
+      var height = 18;
+      var x = rectX + rectW - width - 6;
+      var y = rectY + rectH - height - 6;
+      var fine = g.querySelector('[data-detail="fine"]');
+      if (fine) {
+        fine.setAttribute('text-anchor', 'start');
+        fine.setAttribute('x', rectX + 10);
+      }
+      var dense = count >= 10 || (meta.edge_count || 0) >= 10;
+      var badge = document.createElementNS(SVG_NS, 'g');
+      badge.setAttribute('class', 'cm-sub-badge' + (meta.kind === 'business' ? ' is-business' : '') + (meta.status === 'conflict' ? ' is-conflict' : '') + (dense ? ' is-dense' : ''));
+      badge.setAttribute('aria-hidden', 'true');
+      var bg = document.createElementNS(SVG_NS, 'rect');
+      bg.setAttribute('x', x);
+      bg.setAttribute('y', y);
+      bg.setAttribute('width', width);
+      bg.setAttribute('height', height);
+      bg.setAttribute('rx', 9);
+      var text = document.createElementNS(SVG_NS, 'text');
+      text.setAttribute('x', x + width / 2);
+      text.setAttribute('y', y + 12.6);
+      text.setAttribute('text-anchor', 'middle');
+      text.textContent = label;
+      var tip = document.createElementNS(SVG_NS, 'title');
+      tip.textContent = '可下钻：' + (meta.title || sid) + (count ? '（' + count + ' 个节点' + (meta.edge_count ? ' · ' + meta.edge_count + ' 条关系' : '') + '）' : '');
+      badge.appendChild(bg);
+      badge.appendChild(text);
+      badge.appendChild(tip);
+      badge.addEventListener('click', function (event) {
+        event.stopPropagation();
+        navigate(sid, null);
+      });
+      g.appendChild(badge);
+    });
   }
   function evidenceBlock(evidence) {
     if (!evidence || !evidence.level) return null;
@@ -153,19 +225,29 @@ const SCRIPT = `
     panel.textContent = '';
     panel.appendChild(head('CODEMAP · 节点事实'));
     if (fact.detail) panel.appendChild(el('p', 'cm-detail', fact.detail));
-    var chips = el('div', 'cm-chips');
-    if (fact.kind) chips.appendChild(chipEl(fact.kind));
-    if (fact.level != null) chips.appendChild(chipEl('L' + fact.level));
-    (fact.tags || []).forEach(function (t) { chips.appendChild(chipEl('#' + t)); });
-    panel.appendChild(chips);
+    var metaChips = el('div', 'cm-chips');
+    if (fact.kind) metaChips.appendChild(chipEl(fact.kind));
+    if (fact.level != null) metaChips.appendChild(chipEl('L' + fact.level));
+    panel.appendChild(metaChips);
     [evidenceBlock(fact.evidence), refsBlock(fact.refs), rulesBlock(fact.rules)].forEach(function (b) { if (b) panel.appendChild(b); });
-    panel.appendChild(graphLine());
     var subId = subGraphId(fact.sub);
     if (subId) {
-      var sec = el('div', 'cm-sec');
-      sec.appendChild(goButton('下钻 → ' + (titles[subId] || subId), subId));
+      var meta = subMeta(fact.sub);
+      var scope = meta.status === 'conflict' ? '冲突下钻' : (meta.kind === 'business' ? '业务下钻' : '下钻');
+      var label = scope + ' → ' + (meta.title || titles[subId] || subId);
+      if (meta.node_count) label += ' · ' + meta.node_count + ' 节点';
+      var sec = el('div', 'cm-sec cm-drill' + (meta.kind === 'business' ? ' is-business' : '') + (meta.status === 'conflict' ? ' is-conflict' : ''));
+      sec.appendChild(goButton(label, subId));
+      var dense = [];
+      if (meta.node_count) dense.push(meta.node_count + ' 个节点');
+      if (meta.edge_count) dense.push(meta.edge_count + ' 条关系');
+      if (dense.length) sec.appendChild(el('div', null, dense.join(' · ')));
       panel.appendChild(sec);
     }
+    var tags = el('div', 'cm-chips');
+    (fact.tags || []).forEach(function (t) { tags.appendChild(chipEl('#' + t)); });
+    if (tags.childNodes.length) panel.appendChild(tags);
+    panel.appendChild(graphLine());
     panel.hidden = false;
   }
   function renderEdge(id, fact) {
@@ -195,6 +277,13 @@ const SCRIPT = `
   function sync() {
     scheduled = false;
     if (chip.hidden) { panel.hidden = true; return; }
+    var live = container && container.querySelector('svg');
+    if (live && live !== svg) {
+      svg = live;
+      observeSvg();
+      markSubgraphs();
+    }
+    if (!svg) { panel.hidden = true; return; }
     var edgeId = pinnedEdgeId();
     if (edgeId && facts.edges && facts.edges[edgeId]) { renderEdge(edgeId, facts.edges[edgeId]); return; }
     var focus = svg.getAttribute('data-focus-active');
@@ -205,11 +294,22 @@ const SCRIPT = `
     if (scheduled) return;
     scheduled = true;
     window.requestAnimationFrame(sync);
+    window.setTimeout(function () { if (scheduled) sync(); }, 120);
   }
-  var observer = new MutationObserver(schedule);
-  observer.observe(svg, { attributes: true, attributeFilter: ['data-relationship-pin-active', 'data-focus-active'] });
-  observer.observe(chip, { attributes: true, attributeFilter: ['hidden'] });
+  var svgObserver = new MutationObserver(schedule);
+  function observeSvg() {
+    svgObserver.disconnect();
+    if (svg) svgObserver.observe(svg, { attributes: true, attributeFilter: ['data-relationship-pin-active', 'data-focus-active'] });
+  }
+  observeSvg();
+  var chipObserver = new MutationObserver(schedule);
+  chipObserver.observe(chip, { attributes: true, attributeFilter: ['hidden'] });
+  var containerObserver = new MutationObserver(schedule);
+  if (container) containerObserver.observe(container, { childList: true });
+  document.addEventListener('click', schedule, true);
+  document.addEventListener('focusin', schedule, true);
   schedule();
+  markSubgraphs();
 
   // 上级图入口：放在图容器之前，嵌入模式隐藏（由外壳负责导航）
   if (graph.parent && graph.parent.graph) {

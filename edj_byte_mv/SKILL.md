@@ -1,5 +1,5 @@
 ---
-name: ascii_mv
+name: edj_byte_mv
 description: 把图片转成彩色 ASCII，用 terminaltexteffects 的终端特效逐帧驱动，离线渲染成高质量 mp4（可做 macOS 动态屏保 / 桌面壁纸视频）。当用户要把图片/照片做成 ASCII 动画视频、终端特效短片、字符艺术MV，或要替换 macOS 动态屏保视频时使用。
 ---
 
