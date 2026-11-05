@@ -31,7 +31,7 @@ description: 把图片转成彩色 ASCII，用 terminaltexteffects 的终端特�
      --> ffmpeg 管道编码 mp4
 ```
 
-## 三个必须知道的坑
+## 四个必须知道的坑
 
 ### 1. 不要解析 ANSI 字符串（性能杀手）
 
