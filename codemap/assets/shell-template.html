@@ -180,6 +180,10 @@
   .badge.bad { background: var(--bad-soft); color: var(--bad); }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
   .chips .lab { font-size: 12px; color: var(--muted); }
+  .info-toggle { margin-left: auto; border: 1px solid var(--line); background: var(--panel); color: var(--muted); border-radius: 999px; padding: 1px 9px; font-size: 11px; cursor: pointer; white-space: nowrap; }
+  .info-toggle:hover, .info-toggle:focus-visible { color: var(--accent); border-color: var(--accent); outline: none; }
+  .info-details { display: flex; flex-direction: column; gap: 6px; }
+  .info-details.collapsed { display: none; }
   .chip {
     border: 1px solid var(--line); background: var(--bg); color: var(--ink);
     border-radius: 14px; padding: 1px 10px; font-size: 12px; cursor: pointer;
@@ -488,6 +492,7 @@
   var infoEl = document.getElementById('info');
   var crumbsEl = document.getElementById('crumbs');
   var frame = null, loadedGraph = null, pendingNode = null, resendTimer = 0;
+  var infoExpanded = false;
 
   function parseHash() {
     var m = location.hash.match(/^#\/([^\/]+)(?:\/(.+))?$/);
@@ -564,7 +569,14 @@
     }
     r1.appendChild(meta);
     infoEl.appendChild(r1);
-    if (g.summary) infoEl.appendChild(el('div', 'meta', g.summary));
+
+    // 默认只显示标题、层级和校验信息；摘要、上级与下钻放进可上下展开的详情区。
+    var details = el('div', 'info-details');
+    var hasDetails = false;
+    if (g.summary) {
+      details.appendChild(el('div', 'meta', g.summary));
+      hasDetails = true;
+    }
 
     var p = parentOf.get(g.id);
     if (p) {
@@ -575,7 +587,8 @@
       pb.type = 'button';
       pb.addEventListener('click', function () { go(pg.id, p.node); });
       rp.appendChild(pb);
-      infoEl.appendChild(rp);
+      details.appendChild(rp);
+      hasDetails = true;
     }
     var kids = childrenOf.get(g.id) || [];
     if (kids.length) {
@@ -589,7 +602,23 @@
         b.addEventListener('click', function () { go(cid); });
         rc.appendChild(b);
       });
-      infoEl.appendChild(rc);
+      details.appendChild(rc);
+      hasDetails = true;
+    }
+
+    if (hasDetails) {
+      var toggle = el('button', 'info-toggle', infoExpanded ? '收起 ▴' : '展开下钻 ▾');
+      toggle.type = 'button';
+      toggle.setAttribute('aria-expanded', String(infoExpanded));
+      toggle.addEventListener('click', function () {
+        infoExpanded = !infoExpanded;
+        details.classList.toggle('collapsed', !infoExpanded);
+        toggle.textContent = infoExpanded ? '收起 ▴' : '展开下钻 ▾';
+        toggle.setAttribute('aria-expanded', String(infoExpanded));
+      });
+      r1.appendChild(toggle);
+      details.classList.toggle('collapsed', !infoExpanded);
+      infoEl.appendChild(details);
     }
   }
 
