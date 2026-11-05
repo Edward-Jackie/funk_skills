@@ -7962,7 +7962,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       }
 
       function writeStored() {
-        // 默认状态固定 Still，不保存 Live 偏好，避免其他页面被上次选择带跑。
+        // 默认状态固定 Live，不保存 Still 偏好，避免其他页面被上次选择带跑。
         try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
       }
       function reducedMotion() {
@@ -8112,9 +8112,9 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       createFlows();
       html.setAttribute('data-motion-capable', 'true');
       btn.hidden = false;
-      // 地图页每次打开都从 Still 开始；清掉历史 Live 偏好，避免旧页面读回。
+      // 地图页每次打开默认 Live；清掉历史偏好，Still 只作为当前页的手动选择。
       try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
-      readerPaused = true;
+      readerPaused = false;
       btn.addEventListener('click', function () { setPaused(!readerPaused); });
       if (motionQuery) {
         if (typeof motionQuery.addEventListener === 'function') motionQuery.addEventListener('change', render);
