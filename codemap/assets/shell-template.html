@@ -180,16 +180,6 @@
   .badge.bad { background: var(--bad-soft); color: var(--bad); }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
   .chips .lab { font-size: 12px; color: var(--muted); }
-  .drill-tree { display: flex; align-items: flex-start; gap: 8px; }
-  .drill-tree > .lab { font-size: 12px; color: var(--muted); padding-top: 4px; flex: none; }
-  .drill-list, .drill-item, .drill-children { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-  .drill-row { display: flex; align-items: center; gap: 4px; padding-left: calc(var(--depth, 0) * 14px); }
-  .drill-toggle { flex: none; width: 16px; height: 20px; border: 0; background: none; color: var(--muted); font-size: 10px; cursor: pointer; padding: 0; }
-  .drill-toggle:hover, .drill-toggle:focus-visible { color: var(--accent); outline: none; }
-  .drill-toggle.empty { visibility: hidden; cursor: default; }
-  .drill-children { margin-left: 9px; padding-left: 7px; border-left: 1px solid var(--line); }
-  .drill-children.collapsed { display: none; }
-  .drill-link { text-align: left; }
   .chip {
     border: 1px solid var(--line); background: var(--bg); color: var(--ink);
     border-radius: 14px; padding: 1px 10px; font-size: 12px; cursor: pointer;
@@ -555,52 +545,6 @@
     });
   }
 
-  // 下钻标签树：每个子图一行；有更深子图时给折叠按钮，层级用 padding 缩进。
-  function drillItem(cid, depth) {
-    var c = byId.get(cid);
-    var p = parentOf.get(cid);
-    var parent = p ? byId.get(p.graph) : null;
-    var label = (parent && p ? nodeLabel(parent, p.node) : (c ? c.title : cid)) + (c ? ' → ' + c.title : '');
-    var kids = (childrenOf.get(cid) || []).filter(function (kid) { return byId.has(kid); });
-    var item = el('div', 'drill-item');
-    var row = el('div', 'drill-row');
-    row.style.setProperty('--depth', depth);
-    var toggle = el('button', 'drill-toggle', kids.length ? '▾' : '');
-    toggle.type = 'button';
-    if (kids.length) {
-      toggle.setAttribute('aria-expanded', 'true');
-      toggle.title = '收起/展开下钻';
-    } else {
-      toggle.classList.add('empty');
-      toggle.setAttribute('aria-hidden', 'true');
-    }
-    var link = el('button', 'chip drill-link', label);
-    link.type = 'button';
-    if (!c || !c.rendered) {
-      link.disabled = true;
-      link.title = '未渲染：' + ((c && c.reason) || '未知原因');
-    }
-    link.addEventListener('click', function () { go(cid); });
-    var box = el('div', 'drill-children');
-    kids.forEach(function (kid) { box.appendChild(drillItem(kid, depth + 1)); });
-    // 默认折叠更深的子图，只保留当前图的直接下钻行，避免 17 张图的树一次占满头部。
-    if (kids.length) {
-      box.classList.add('collapsed');
-      toggle.textContent = '▸';
-      toggle.setAttribute('aria-expanded', 'false');
-    }
-    toggle.addEventListener('click', function () {
-      var collapsed = box.classList.toggle('collapsed');
-      toggle.textContent = collapsed ? '▸' : '▾';
-      toggle.setAttribute('aria-expanded', String(!collapsed));
-    });
-    row.appendChild(toggle);
-    row.appendChild(link);
-    item.appendChild(row);
-    item.appendChild(box);
-    return item;
-  }
-
   function setInfo(g) {
     infoEl.textContent = '';
     var r1 = el('div', 'info-row');
@@ -633,14 +577,19 @@
       rp.appendChild(pb);
       infoEl.appendChild(rp);
     }
-    var kids = (childrenOf.get(g.id) || []).filter(function (cid) { return byId.has(cid); });
+    var kids = childrenOf.get(g.id) || [];
     if (kids.length) {
-      var tree = el('div', 'drill-tree');
-      tree.appendChild(el('span', 'lab', '下钻'));
-      var list = el('div', 'drill-list');
-      kids.forEach(function (cid) { list.appendChild(drillItem(cid, 0)); });
-      tree.appendChild(list);
-      infoEl.appendChild(tree);
+      var rc = el('div', 'chips');
+      rc.appendChild(el('span', 'lab', '下钻'));
+      kids.forEach(function (cid) {
+        var c = byId.get(cid), node = parentOf.get(cid).node;
+        var b = el('button', 'chip', nodeLabel(g, node) + ' → ' + c.title);
+        b.type = 'button';
+        if (!c.rendered) { b.disabled = true; b.title = '未渲染：' + (c.reason || ''); }
+        b.addEventListener('click', function () { go(cid); });
+        rc.appendChild(b);
+      });
+      infoEl.appendChild(rc);
     }
   }
 
