@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 import argparse
-import os
 import glob
 import json
 import os
@@ -19,6 +18,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import yaml
@@ -64,7 +64,7 @@ def find_node() -> str:
 
 def load_graphs(graph_dir: Path) -> list[dict]:
     graphs = []
-    for f in sorted(graph_dir.glob("*.yaml")):
+    for f in sorted([*graph_dir.glob("*.yaml"), *graph_dir.glob("*.yml")]):
         data = yaml.safe_load(f.read_text(encoding="utf-8"))
         if isinstance(data, dict) and data.get("schema") == "codemap.graph/v2":
             data["_file"] = f
@@ -103,14 +103,18 @@ def build_one(
     out_dir.mkdir(parents=True, exist_ok=True)
     state, note = "failed", ""
     for index, limit in enumerate(SUBLABEL_LADDER):
-        state, note = build_attempt(graph, root, out_dir, node, quality, finalize, limit, strict_layout)
+        # 每次尝试从空派生目录生成新回执；失败保留旧产物，不删除旧证据来绕过归属检查。
+        with tempfile.TemporaryDirectory(prefix=".codemap-build-", dir=out_dir) as temporary:
+            staging = Path(temporary)
+            state, note = build_attempt(graph, root, staging, node, quality, finalize, limit, strict_layout)
+            if state == "ok":
+                for artifact in staging.iterdir():
+                    if artifact.is_file():
+                        os.replace(artifact, out_dir / artifact.name)
         if state != "failed" or "readability" not in note:
             break
         if index + 1 < len(SUBLABEL_LADDER):
             print(f"  {graph['id']}: 文字可读性不足，副标题上限降为 {SUBLABEL_LADDER[index + 1]} 重试", file=sys.stderr)
-            # Archify 不会覆盖上一次留下的浏览器检查证据，重试前清掉本图的全部派生产物
-            for stale in out_dir.glob(f"{graph['id']}.*"):
-                stale.unlink()
     return state, note
 
 
