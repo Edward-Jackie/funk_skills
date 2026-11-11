@@ -9,6 +9,8 @@ description: >
 
 发布基线保持 4.0；配套 MCP v4.1 分支增加共享变更日志、字节分页和渐进初始化。使用这些能力前读 [日志与维护契约](references/change-log-workflow.md)，并核对当前服务工具定义；本地规范已更新不代表线上已部署。
 
+Git push 时可由 Codemap pre-push hook 自动检查结构与新鲜度；它只提醒，不代替语义日志和地图维护。完成新项目地图初始化后，按日志契约接入同一 hook，不另装客户端生命周期 hooks。
+
 CODEMAP 是带证据的导航缓存，不替代源码、测试、运行环境或人工确认的业务要求。让下一次冷启动能在两步内从任务或故障现象走到首个可靠代码锚点，并在高风险业务中看见不能破坏的规则。
 
 4.0 的结构：**Codemap 管事实，Archify 管呈现**。地图事实保存在 `~/.codemap/maps/<project>/<branch>/`（兼容旧 `.map/`）的 Markdown 与 Graph 中；图是由 Graph 单向编译出的派生产物，渲染器是内置的 Archify 分支（`renderers/archify/`，Apache-2.0，改动见 [Archify 集成](references/archify-integration.md)）。原 Explorer 前端已退役。

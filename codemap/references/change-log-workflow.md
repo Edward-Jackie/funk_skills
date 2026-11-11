@@ -41,6 +41,10 @@
 
 ## 显式维护
 
+Codemap 自动触发统一使用 Git pre-push：复用 MCP 的 `check_map.sh --age` 检查器，只检查当前检出且正在推送的同名分支；其他目标分支提示另行核对，工作区不干净时跳过并提醒，避免误验待推送提交。结果不等于业务变化已核实或日志已记录，不自动 apply/skip、开预算轮或上传内容；检查入口不可用、失败或超过 8 秒只提醒；原有 Git hook 独立先执行，其阻断规则照常保留。
+
+完成新项目地图初始化后，用服务仓 `python3 codemap_push_hook.py install --cwd /项目根 --apply` 接入；已登记的项目可用 `install --registered --apply`。服务安装目录按本机配置定位；安装只合并 Git pre-push，不设置全局 core.hooksPath，不安装 Codex/OpenCode/dsh 生命周期监听。检查失败时主 AI 按当前任务授权走下述显式维护；没有授权则说明风险，不借提醒扩展任务。
+
 实现唯一位于 MCP 服务仓，skill 不复制 JSONL/SQLite/预算实现。当前本机入口是 `~/dev/work/codemap/codemap_cli.py`；其他机器从已配置的服务安装目录定位，先读 `--help`，找不到应说明，不把此绝对路径当跨机器配置。
 
 - 语义批次完成后 `record` 写 pending：填写行为变化、anchors、evidence、details；工具生成稳定 ID、operation_id、时间及源码指纹。优先级 P0/P1/P2 与影响 high/normal/low 分开。
