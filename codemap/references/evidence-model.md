@@ -103,6 +103,8 @@ verified-commit: 0123456789abcdef
 - MCP 响应必须携带 `freshness` 信封；`level != fresh` 时附 `disclaimer`，`hits` 为空时给 `empty_reason`。
 - M4 过期比例 = 有问题的锚点数 / 锚点总数；M1 命中日志写入 `<map-root>/.metrics/query.jsonl`，两者都只留本地。
 
+v4.1 服务另核对命中范围的源码/工作区/已知依赖及地图指纹，不能只凭 HEAD 或一处未变锚点提升全域状态。没有水位、仍有 pending/needs-review、依赖不完整或地图指纹失配时明确待复核；无 checkout 保持 unknown。日志状态 applied 只说明对应操作通过门禁，不自动提升事实的证据等级；supersedes 及处理状态按目标分支隔离，历史查询必须标历史。详细流程见 [日志与维护契约](change-log-workflow.md)。
+
 ## 冲突
 
 冲突必须显式使用 `[CONFLICT][conflict]`，这样校验器才能可靠计数：

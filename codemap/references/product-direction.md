@@ -13,6 +13,7 @@ Codemap 首先是 AI 的项目认知层，其次才是人的可视化入口。�
 | v3.0 | 已交付 | Markdown + Graph v2 + 内置 Archify 渲染、下钻外壳、`query_graph`、`impact_diff` | 历史基线；Explorer 已退役 |
 | v3.1 | 已交付（S2 未投入） | ① 新鲜度守卫（过期分级、可失败、读取前警告）② 收益度量（M1 命中日志 / M4 过期比例）③ 页面级五层锚点 ④ MCP 只读取数层 | **只改校验、采集与取数层，不碰渲染链** |
 | v4.0 | 已交付 | 地图迁到 `~/.codemap/maps/<project>/<branch>`；单 Git 仓库；views 按 domain 分组；MCP 与脚本统一解析 | 破坏性布局变更；旧 `.map/` 只读回退 |
+| v4.1 | 分支开发与本地验证，未发布 | 云端共享 JSONL、可重建 SQLite 索引、范围读取预算、CLI 维护闭环、导航先行 | 规范见 [日志与维护契约](change-log-workflow.md)；不把本地验证当线上发布 |
 | v3.2 | 未开工 | 画布批注图层、Overlay 三镜头渲染、viewer 补丁层扩展 | 讨论层；开工前须先验证侧车方案 U1 |
 
 ### v4.0 地图布局
@@ -38,14 +39,14 @@ Codemap 首先是 AI 的项目认知层，其次才是人的可视化入口。�
 
 ### MCP 边界（v4.0）
 
-MCP 只包装同一套 Core，**只读、不写、不缓存第二份状态**：
+MCP 读取包装同一套 Core，不修改权威事实；派生索引和快照可重建，不能成为第二份真源：
 
 - 工具：`codemap_list_projects`、`codemap_status`、`codemap_route`、`codemap_read`、`codemap_query`、`codemap_rules`、`codemap_impact`、`codemap_check`、`codemap_docs`。
 - 每次响应必须携带新鲜度信封；`level` 非 `fresh` 时不得用确定语气给结论。
 - 空命中必须给出原因，**不得被解读为"业务不存在"**。
 - `codemap_read` 缺省返回章节目录，按 `heading` 精确读取；`codemap_check` 等价 `check_map.sh --age`。
 - 写入工具默认不注册；只有设置 `CODEMAP_ENABLE_WRITE=1` 后才出现，仍须用户明确要求。
-- 写地图、建图、`build_views` 等仍留在 skill 与 CLI，不进 MCP。
+- 新日志写入、建图与 `build_views` 留在本机 CLI/skill；旧地图的显式 MCP 写入口保留兼容，远程角色不注册写工具。新版本的权限、存储和预算以日志与维护契约为准。
 
 ## 两类使用者
 
@@ -108,6 +109,8 @@ Graph / Overlay → ViewSpec → 临时 IR → HTML / SVG / 浏览器回执
 - Mermaid、Web 和查询结果都是可丢弃、可重建的派生产物。
 
 ## Clean Break 重建
+
+本节只用于事实模型的破坏性重建。v4.1 日志与读取协议升级保持 Graph schema，不触发全量建图；过时条目按待审记录逐项复核。
 
 1. 冻结 Markdown 模板、Graph v2、Overlay 和工具行为。
 2. 在隔离目录 `<map-root>/next/` 选择一个真实高风险领域，从源码重新取证并生成完整样板。

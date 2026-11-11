@@ -5,6 +5,7 @@ set -uo pipefail
 
 STRICT=0
 AGE=0
+STAGE="auto"
 MAP_ROOT=""
 ROOT_ARG=""
 BRANCH_ARG=""
@@ -18,6 +19,11 @@ while [ "$#" -gt 0 ]; do
     --age)
       AGE=1
       shift
+      ;;
+    --stage)
+      [ "$#" -ge 2 ] || { echo "--stage 缺少阶段" >&2; exit 2; }
+      case "$2" in navigation|graph) STAGE="$2" ;; *) echo "阶段必须为 navigation 或 graph" >&2; exit 2 ;; esac
+      shift 2
       ;;
     --root)
       [ "$#" -ge 2 ] || { echo "--root 缺少项目根目录" >&2; exit 2; }
@@ -81,6 +87,11 @@ fi
 INDEX="$MAP_DIR/CODEMAP.md"
 [ -f "$INDEX" ] || { echo "CODEMAP 不存在：$INDEX" >&2; exit 1; }
 INDEX_ABS="$INDEX"
+if [ "$STAGE" = "auto" ]; then
+  STAGE="$(sed -n 's/^map-stage:[[:space:]]*//p' "$INDEX" | head -1)"
+  STAGE="${STAGE:-graph}"
+  case "$STAGE" in navigation|graph) ;; *) echo "map-stage 必须为 navigation 或 graph" >&2; exit 2 ;; esac
+fi
 EXPECTED_INDEX="$INDEX_ABS"
 MAP_REPO="$(git -C "$MAP_DIR" rev-parse --show-toplevel 2>/dev/null || true)"
 
@@ -260,7 +271,17 @@ echo
 echo "== Graph =="
 GRAPH_DIR="$MAP_DIR/graphs"
 if [ ! -d "$GRAPH_DIR" ]; then
-  error "缺少 ${GRAPH_DIR#$ROOT/}；关系结构必须使用 Graph YAML"
+  if [ "$STAGE" = "navigation" ]; then
+    # 导航只保存已核验的局部线索；不能引用尚未生成和验证的关系视图。
+    while IFS= read -r map_file; do
+      if grep -Eq '\]\([^)]*\.(mmd|html)(#[^)]*)?\)' "$map_file"; then
+        error "导航阶段不能引用未建模的视图：${map_file#$MAP_DIR/}"
+      fi
+    done < "$FILES_LIST"
+    echo "导航阶段：不要求 Graph；证据、链接、锚点和新鲜度检查照常执行。"
+  else
+    error "缺少 ${GRAPH_DIR#$ROOT/}；关系结构必须使用 Graph YAML"
+  fi
 else
   graph_args=(--root "$ROOT" --map-root "$MAP_DIR" --refs-out "$GRAPH_REFS" --views-out "$GRAPH_VIEWS")
   [ "$STRICT" -eq 1 ] && graph_args=(--strict "${graph_args[@]}")

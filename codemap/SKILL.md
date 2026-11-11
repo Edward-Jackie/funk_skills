@@ -7,6 +7,8 @@ description: >
 
 # Codemap 4.0
 
+发布基线保持 4.0；配套 MCP v4.1 分支增加共享变更日志、字节分页和渐进初始化。使用这些能力前读 [日志与维护契约](references/change-log-workflow.md)，并核对当前服务工具定义；本地规范已更新不代表线上已部署。
+
 CODEMAP 是带证据的导航缓存，不替代源码、测试、运行环境或人工确认的业务要求。让下一次冷启动能在两步内从任务或故障现象走到首个可靠代码锚点，并在高风险业务中看见不能破坏的规则。
 
 4.0 的结构：**Codemap 管事实，Archify 管呈现**。地图事实保存在 `~/.codemap/maps/<project>/<branch>/`（兼容旧 `.map/`）的 Markdown 与 Graph 中；图是由 Graph 单向编译出的派生产物，渲染器是内置的 Archify 分支（`renderers/archify/`，Apache-2.0，改动见 [Archify 集成](references/archify-integration.md)）。原 Explorer 前端已退役。
@@ -55,10 +57,12 @@ CODEMAP 是带证据的导航缓存，不替代源码、测试、运行环境或
 - 视图按 Graph 的 `domain` 分组：`views/<domain>/<flow>.*`；Graph 的 `view` 字段指向 `../views/<domain>/<flow>.mmd`。
 - L1/L2 扁平同级；名称只用小写英文、数字和连字符。L1 目标不超过 120 行，L2 不超过 240 行。
 - `AGENTS.md`、`CLAUDE.md` 等入口只引用同一份 L1，不复制正文。
-- 旧 `.claude/`、`.codex/` 或项目内 `.map/` 先运行 `scripts/migrate_maps --root <项目根> --remove-legacy`，不得留下两套事实源。
+- 迁移旧 `.claude/`、`.codex/` 或 `.map/` 时先隔离生成并核验，保留旧图只读以便恢复；验证并切换入口后才清理旧副本，不允许两套可写真源。日志升级不要求重建既有 Graph。
 - 基础 Graph 只保存已存在或已确认的事实；未实施需求写入 Overlay，标 `proposal/unverified`。
 
 ## 工作流
+
+先区分导航初始化与完整建图。无图的普通任务先回源码；已授权的导航初始化按 [渐进初始化](references/change-log-workflow.md#渐进初始化) 先交付 L1/必要 L2，第 6—8 步仅在完整建图时执行。导航不创建空 Graph；已有 Graph 必须继续校验。
 
 1. **读项目约束**：读适用的 `AGENTS.md`、`CLAUDE.md`，确认编辑边界。改版预览输出到地图目录的 `next/`，不与旧 Graph 混读，验证后由用户决定替换。
 2. **读最小上下文**：地图存在时先读 L1 的路由、`status`、冲突，再加载命中的最小 L2。
@@ -81,18 +85,19 @@ CODEMAP 是带证据的导航缓存，不替代源码、测试、运行环境或
    每张图独立失败不阻断其余；退出码非零表示有失败。有源码锚点的图会带 `meta.repository`，锚点在固定版本不存在时不进图（仍留在侧车），并给出警告。
 9. **AI 取最小上下文**：`scripts/query_graph <map-root>/graphs --root <项目根> --query '<需求>' --depth 2`，优先加载命中节点的 Markdown 章节、规则、风险与锚点。命中带 `sub` 的节点会提示可下钻的子图，分图命中会输出上级链。地图非 `fresh` 时，输出首行先给新鲜度横幅，再给结果。
 10. **开发后反查影响**：`scripts/impact_diff <map-root>/graphs --root <项目根> [--base <rev>]`；Diff 未命中必须明确报告，不能解释为「没有业务影响」。同样先输出新鲜度横幅。
-11. **增量写入**：保留所有 `<!-- manual: keep -->` 块，只改变化的事实；不创建 `.bak`，历史交给 Git。
+11. **增量写入**：保留所有 `<!-- manual: keep -->` 块，只改变化的事实；不创建 `.bak`，历史交给 Git。具备 v4.1 日志能力时，语义批次通过本机 CLI record，再按依据 apply/skip，失败或源变化不标 applied；详见日志契约。
 
 ## MCP 取数层（v4.0）
 
-MCP 只包装同一套脚本，不复制检索逻辑，**只读、不写**。客户端按需选择，不替代 skill 的写作纪律。
+MCP 读取不修改权威日志或地图；新日志 Core 在服务仓，地图脚本仍在 skill 真源，各自单一实现。客户端按需选择，不替代 skill 的写作纪律。
 
 - 工具：`codemap_list_projects`、`codemap_status`、`codemap_route`、`codemap_read`、`codemap_query`、`codemap_rules`、`codemap_impact`、`codemap_check`、`codemap_docs`。
-- 每次读取返回统一信封：`freshness`、`disclaimer`、`hits`、`warnings`、`empty_reason`、`next`。`freshness.level` 取 `fresh | aging | needs-review | stale | conflict | unknown`；非 `fresh` 时只能当线索。
-- `codemap_read` 不传 `heading` 只返回章节目录；传 `heading` 读具体章节，`max_lines` 控制截断。Graph YAML 直接读正文。
+- 地图读取结果返回统一信封：`freshness`、`disclaimer`、`hits`、`warnings`、`empty_reason`、`next`。`freshness.level` 取 `fresh | aging | needs-review | stale | conflict | unknown`；非 `fresh` 时只能当线索。
+- `codemap_read` 已知 heading 直接读取，未知才查目录。v4.1 分支的 Graph/Overlay 默认返回对象目录，用 selector 选择节点/边；max_lines 仅兼容，字节分页不会永久丢失正文。旧服务行为以其工具定义为准。
+- v4.1 分支新增 `codemap_log_search/read/timeline` 、`codemap_checkpoint` 与 `codemap_budget`；所有内容读取必须传 task_id/round_id，缺少时拒绝正文；日志不因默认分支回退而串读，云端是共享权威入口，SQLite 仅索引。按需检索、统一预算、引用读取和子 Agent 契约见日志与维护契约，不把历史查询设为每次前置流程。
 - `codemap_check` 等价 `check_map.sh --age`，返回结构化的 `errors`、`warnings`、失效锚点和新鲜度，校验失败不抛异常。
 - 度量只落本地：`query_graph` 追加地图目录的 `.metrics/query.jsonl`（M1），`freshness` 输出锚点过期比例（M4）；不上报、不阻塞。
-- 写入工具默认未注册；确需写入时设置 `CODEMAP_ENABLE_WRITE=1` 后重启服务，且仍须用户明确要求。
+- 旧地图写工具默认未注册，仅本机显式开关可启用；新日志 MCP 始终只读，写入通过本机 CLI。不要为任务擅自改开关、启动或重启服务。
 - 启动时比较本地 skill 与 MCP 基线版本：一致用本地，不一致用高版本；选不到可用副本直接拒绝启动。
 
 ## 读图方式（给人）
@@ -121,10 +126,10 @@ MCP 只包装同一套脚本，不复制检索逻辑，**只读、不写**。客
 
 - 一个真实任务或故障现象能从 L1 在两步内到达最小 L2 和首个锚点。
 - 高风险领域记录了业务成功、状态真相、不变量、幂等、副作用和失败补偿。
-- Graph 无重复 ID、悬空边、孤立节点、缺失条件、失效 refs 或未声明环；生成视图已被 Markdown 引用。
-- `scripts/check_map.sh --root <项目根> --age` 通过；过期、失效锚点或冲突必须明确交付为风险，不得伪造 `current`。
-- `scripts/build_views --finalize` 全部通过，节点与边 ID 在 Graph、候选、侧车、HTML 间一致。
-- 点击节点/边能看到条件、证据与源码锚点；summary 到 detail 能两跳进退，面包屑正确。
+- 完整建图时 Graph 无重复 ID、悬空边、孤立节点、缺失条件、失效 refs 或未声明环；生成视图已被 Markdown 引用。
+- 导航阶段 `scripts/check_map.sh --root <项目根> --stage navigation --age` 通过；完整建图使用 `--stage graph`。过期、失效锚点或冲突必须交付为风险，不得伪造 `current`。元信息 map-stage 缺省按 graph，不能用 map-mode 推断是否已建图。
+- 完整建图时 `scripts/build_views --finalize` 全部通过，节点与边 ID 在 Graph、候选、侧车、HTML 间一致。
+- 完整建图时点击节点/边能看到条件、证据与源码锚点；summary 到 detail 能两跳进退，面包屑正确。
 - 结构检查、浏览器检查和人眼视觉复核分别报告，未做的不得声称已验收。
 - 关键结论有事实类型、证据等级和具体来源；规则与实现差异进入冲突台账。
 - 校验不能通过的项目被明确交付为风险，而不是伪造 `current`。

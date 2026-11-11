@@ -2,6 +2,8 @@
 
 创建新地图或重构导航结构时使用。日常只改命中任务的条目，不要每次套完整模板。
 
+先选阶段：导航初始化在元信息中加 `map-stage: navigation`，只承诺已核验范围；以下模板中的“生成视图”章节整段省略，不创建空 Graph。完整建图改为 `map-stage: graph` 并启用视图章节，将关系/条件/refs 归入 Graph。导航阶段允许 Markdown 保存局部调用线索与盲区；小项目可只建 L1，路由直接指向本文件章节及可靠源码锚点，不保留不存在的 L2 链接。发布与门禁见 [日志与维护契约](change-log-workflow.md)。
+
 ## L1：`<map-root>/CODEMAP.md`
 
 ```markdown
@@ -10,6 +12,7 @@
 <!-- codemap-meta
 map-role: index
 map-mode: navigation
+map-stage: navigation
 status: needs-review
 verified-at: <YYYY-MM-DD>
 verified-commit: <Git commit>
@@ -54,6 +57,7 @@ L1 只负责路由。详细调用链、业务说明和历史不要塞进 L1。
 <!-- codemap-meta
 map-role: domain
 map-mode: navigation
+map-stage: navigation
 status: needs-review
 verified-at: <YYYY-MM-DD>
 verified-commit: <Git commit>
@@ -81,7 +85,7 @@ verified-commit: <Git commit>
 - [控制流](views/<domain>-control.mmd)（源：`graphs/<domain>-control.yaml`）
 - [数据流](views/<domain>-data.mmd)（源：`graphs/<domain>-data.yaml`；仅在数据形态变化难以从控制流看出时生成）
 
-关系、条件、refs、证据和盲区只在 Graph YAML 维护；这里不手写 Mermaid。
+完整建图后，结构化关系、条件和 refs 在 Graph YAML 维护，Markdown 保留导航、规则、证据解释与盲区；不手写 Mermaid。导航阶段尚未建立完整关系模型，只保存已核验的局部线索。
 
 ## 症状定位
 
