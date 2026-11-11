@@ -23,7 +23,7 @@ Archify 的 `deliver` 会把侧车随规格快照冻结，所以 `finalize` 的�
 | node `id` / `label` | 同名 | ID 必须以字母开头，否则编译报错 |
 | node `lane` | `lanes[]` 与 `nodes[].lane` | 无泳道声明时生成单泳道 |
 | node `level` | `col`（0..5） | 跨泳道全局顺序，均匀压缩到 6 列 |
-| 同泳道同列多节点 | `yOffset` 竖向堆叠，步长 90 | 单格最多 4 个，超出报错，提示拆 detail 图 |
+| 同泳道同列多节点 | `yOffset` 竖向堆叠，步长 140 | 单格最多 4 个，超出报错，提示拆 detail 图。较原步长 90 增加路由留空；画布可能增高，不能据此保证消除 `ambiguous-corridor`，仍须执行布局门禁 |
 | node `kind` | `type`：entry→frontend，process/decision/terminal→backend，state/store→database，external→external | |
 | node `detail` | `sublabel`（截断 26 字） | 全文在侧车 |
 | node `tags[0]` | `tag` | 全部标签在侧车 |

@@ -23,7 +23,7 @@ import yaml
 ID_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]*$")
 MAX_COL = 5  # archify workflow 的列上限
 MAX_STACK = 4  # 同泳道同列最多竖向堆叠的节点数
-STACK_STEP = 90  # 竖向堆叠的间距（archify 文档推荐 -90/0/90）
+STACK_STEP = 140  # 增加同格节点间距，为关系线路由留空；密集图仍须通过布局门禁或拆图。
 SUBLABEL_LIMIT = 26
 SOURCE_LABEL_LIMIT = 48
 SOURCE_MAX = 3
