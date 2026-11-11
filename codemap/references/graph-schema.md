@@ -52,7 +52,7 @@ nodes:
     context:
       load: required           # required | optional
       markdown:
-        - path: <map-root>/CODEMAP-billing.md
+        - path: CODEMAP-billing.md
           heading: 实时计费主链
     refs:
       - path: proxy/service/billing_service.go
@@ -87,14 +87,15 @@ cycles: []                    # 每个实际有向环都必须声明
 - `state`：生命周期和状态迁移；边通常使用 `transition`。
 - `direction` 只影响生成视图，不改变业务语义。所有视图遵循同一条规则：**从入口层开始排**。`LR`（横向）入口层在最左，泳道行也从入口泳道排起；`TB`（纵向）入口层在最上，每个 `level` 成一行，原泳道转成列（列头显示泳道名，最多 6 条泳道）。缺省按 `LR`。
 - 不保存坐标。布局算法、折叠状态、筛选条件和镜头位置都属于视图状态。
+- 节点数上限不是可读性保证：层级会压缩到 6 列，同泳道同列最多 4 节点。资金处理与异步账单投递等不同职责优先拆为父子图；出现共享走廊、路由求解失败时按职责拆图，不能只改 level 反复碰运气，也不能删事实或关闭严格门禁。
 
 `layout.lanes` 存在时，每个节点必须引用已声明的 `lane`。渲染时泳道按“从入口开始的流程次序”重排：泳道内节点的最小 `level` 越小越靠前，`level` 相同才按 `order`、再按声明顺序。因此 `order` 不决定位置，只用来在同层级的泳道之间定先后；入口泳道的节点要把 `level` 写成最小值。
 
 ## tags 与 context
 
 - `tags` 用于需求检索，保存稳定业务词，不堆函数名和同义词。
-- `context.load: required` 表示命中节点时默认加载对应 Markdown 章节；`optional` 只输出引用，由 AI 判断是否继续读取。
-- `context.markdown[].path` 必须是仓库内已存在的相对路径；`heading` 必须是非空章节名。查询器只输出章节引用，不复制整份领域包。
+- `context.load: required` 表示命中后应优先读取的章节引用；`optional` 按需读取，查询器均不会自动展开正文。
+- `context.markdown[].path` 使用 `CODEMAP-<domain>.md` 引用当前 map root 内的领域包（兼容旧 `.map/CODEMAP-<domain>.md`）；其他文档使用源码仓内已存在的相对路径。禁止绝对路径、`..` 或软链越界；`heading` 必须是非空章节名。查询器只输出引用，不复制整份领域包。
 
 ## 层级与 sub
 

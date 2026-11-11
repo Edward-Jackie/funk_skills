@@ -398,9 +398,13 @@ class Validator:
                             self.error(file, f"{context_owner}.path 不能为空")
                         else:
                             context_path = Path(path_value)
-                            absolute_context = (self.root / context_path).resolve()
-                            if context_path.is_absolute() or ".." in context_path.parts or not inside(absolute_context, self.root):
-                                self.error(file, f"{context_owner}.path 必须是仓库内相对路径：{path_value}")
+                            # 地图迁出源码仓后，CODEMAP 引用相对 map root；其他文档仍相对源码仓。
+                            map_context = re.fullmatch(r"(?:\.map/)?CODEMAP(?:-[A-Za-z0-9_-]+)?\.md", path_value)
+                            base = self.map_dir if map_context else self.root
+                            relative = Path(path_value.removeprefix(".map/")) if map_context else context_path
+                            absolute_context = (base / relative).resolve()
+                            if context_path.is_absolute() or ".." in context_path.parts or not inside(absolute_context, base):
+                                self.error(file, f"{context_owner}.path 必须是地图或仓库内相对路径：{path_value}")
                             elif not absolute_context.is_file():
                                 self.error(file, f"{context_owner}.path 不存在：{path_value}")
                         if not isinstance(heading, str) or not heading.strip():
