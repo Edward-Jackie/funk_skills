@@ -49,7 +49,9 @@ Codemap 自动触发统一使用 Git pre-push：复用 MCP 的 `check_map.sh --a
 
 - 语义批次完成后 `record` 写 pending：填写行为变化、anchors、evidence、details；工具生成稳定 ID、operation_id、时间及源码指纹。优先级 P0/P1/P2 与影响 high/normal/low 分开。
 - 根据 Diff、当前源码和地图裁定 add/update/delete/none；历史只在需要时查。源码删除可能更新替代路径；测试解除已有风险应更新 VERIFY，等价格式变化可 none。
-- `apply` 先在隔离目录校验，保留 RULE/manual，再发布地图；源码/依赖及地图指纹匹配、门禁通过后才 applied。`skip` 留理由、核对范围和实际地图版本后 skipped；云端必须读取权威地图，地图凭证缺失或版本变化时不能关闭裁定。失败、版本变化或冲突保持/恢复 needs-review，不能提升整域新鲜度。
+- 候选放在目标 map home 之外的任务目录；把候选完整文本放进 `apply` 的 `files`，不要先改已发布文件再调用 apply。首次初始化也先 `record`，由 apply 写领域文件并最后发布 L1；“无实际变化”是保护，不要通过清空正式地图绕过。
+- `apply` 先在隔离目录校验，保留 RULE/manual，再发布地图；源码/依赖及地图指纹匹配、门禁通过后才 applied。Graph 发布同时执行 `build_views --finalize --strict-layout`。`skip` 留理由、核对范围和实际地图版本后 skipped；云端必须读取权威地图，地图凭证缺失或版本变化时不能关闭裁定。失败、版本变化或冲突保持/恢复 needs-review，不能提升整域新鲜度。
+- `record.dependencies_complete` 表示所列源码与已知依赖已核对；`apply/skip.map_scope_complete` 表示关联的**整份地图文件**事实已核对，二者默认 false、互不替代。只核对局部符号时不能设 true。applied 只证明本次发布成功，局部更新仍可返回 needs-review；诊断应查看 `freshness.scope.checks` 的具体原因，而非反复改日期或补虚假水位。
 - 重试复用原操作 ID 和相同内容；新裁定另建操作。云端整文件删除用 deletes，服务维护分支删除标记，防止默认分支旧文件复活；历史 JSONL 不删除。
 - 旧日志迁移默认预览，显式 apply 才写入；原始行保留，未知字段标待核对，不能伪造发生时间或继承旧完成状态。迁移真实数据、部署、推送均按当前任务授权边界执行。
 
@@ -60,3 +62,9 @@ Codemap 自动触发统一使用 Git pre-push：复用 MCP 的 `check_map.sh --a
 导航阶段用紧凑 L1/必要 L2 保存路由、锚点、局部调用线索和盲区，元信息标 `map-stage: navigation`；小项目可只建 L1。不创建空 Graph，不引用未生成视图。隔离草稿验过证据/链接/锚点/新鲜度后，先准备 L2 与 pending 日志，最后发布 L1；迁移保留旧图。源码变化只复核相关范围。
 
 完整建图阶段将关系/条件/refs 归入 Graph，Markdown 保留导航和引用，不维护第二张关系表；标 `map-stage: graph`，运行 Graph、视图与浏览器完整门禁。存在 Graph 时即使标 navigation 也必须执行 Graph 检查。
+
+## 验收收尾
+
+证据足以回答本轮任务就停止扩展取证，未覆盖领域列为盲区，不写成已有路由。候选校验与**发布后**读取分别留证，不能用发布前状态代替最终状态；源码期间有变化时只描述观测到的版本变化，不猜作者或推送状态。锚点存在性不等于业务语义正确。
+
+验收日志保存命令的真实退出码（用子进程 returncode 或明确支持的 pipefail），不能把 tee/tail 的成功当检查成功。自动浏览器门禁、截图视觉复核和业务运行验证分开报告。MCP 无法拦截宿主 shell，外部读取开销单列，不宣称所有输入都受 MCP 预算限制。临时夹具与截图遵守本任务允许的输出目录。
