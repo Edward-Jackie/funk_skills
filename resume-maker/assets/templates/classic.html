@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>简历</title>
+    <style>
+        /* 页面设置 */
+        @page {
+            size: A4;
+            margin: 20mm 15mm;
+        }
+
+        /* 基础样式 */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: "Source Han Sans SC", "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+            font-size: 11pt;
+            line-height: 1.6;
+            color: #333;
+        }
+
+        /* 容器 */
+        .resume {
+            max-width: 210mm;
+            margin: 0 auto;
+        }
+
+        /* 头部 - 基本信息 */
+        .header {
+            text-align: center;
+            margin-bottom: 24pt;
+            padding-bottom: 16pt;
+            border-bottom: 2pt solid #333;
+        }
+
+        .header h1 {
+            font-size: 24pt;
+            font-weight: 600;
+            margin-bottom: 8pt;
+            letter-spacing: 2pt;
+        }
+
+        .header .contact {
+            font-size: 10pt;
+            color: #666;
+        }
+
+        .header .contact span {
+            margin: 0 8pt;
+        }
+
+        .header .contact a {
+            color: #666;
+            text-decoration: none;
+        }
+
+        /* Section 标题 */
+        .section-title {
+            font-size: 13pt;
+            font-weight: 600;
+            color: #1a1a1a;
+            margin: 20pt 0 12pt 0;
+            padding-bottom: 6pt;
+            border-bottom: 1pt solid #ddd;
+            text-transform: uppercase;
+            letter-spacing: 1pt;
+        }
+
+        /* Subsection */
+        .subsection {
+            margin-bottom: 16pt;
+        }
+
+        .subsection-title {
+            font-size: 11pt;
+            font-weight: 600;
+            color: #1a1a1a;
+            margin-bottom: 6pt;
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+        }
+
+        .subsection-title .date {
+            font-weight: 400;
+            font-size: 10pt;
+            color: #666;
+        }
+
+        .subsection-subtitle {
+            font-size: 10pt;
+            color: #666;
+            margin-bottom: 6pt;
+            font-style: italic;
+        }
+
+        /* 列表 */
+        ul {
+            padding-left: 16pt;
+        }
+
+        li {
+            margin-bottom: 4pt;
+            line-height: 1.5;
+        }
+
+        /* 技能标签 */
+        .skills-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8pt;
+            margin-top: 8pt;
+        }
+
+        .skill-category {
+            margin-bottom: 12pt;
+            width: 100%;
+        }
+
+        .skill-category-name {
+            font-weight: 600;
+            font-size: 10pt;
+            color: #666;
+            margin-bottom: 6pt;
+        }
+
+        .skill-tag {
+            display: inline-block;
+            background: #f5f5f5;
+            padding: 4pt 10pt;
+            border-radius: 3pt;
+            font-size: 10pt;
+            margin-right: 6pt;
+            margin-bottom: 6pt;
+        }
+
+        .skill-tag.proficient {
+            background: #e8f4f8;
+            color: #2c7a94;
+        }
+
+        /* 链接 */
+        a {
+            color: #2563eb;
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        /* 分页控制 */
+        .subsection {
+            page-break-inside: avoid;
+        }
+
+        .section {
+            page-break-before: auto;
+        }
+
+        /* 打印优化 */
+        @media print {
+            body {
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+            }
+
+            .skill-tag {
+                border: 1pt solid #ddd;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="resume">
+        {% for section_name, section_content in sections.items() %}
+        <div class="section">
+            <h2 class="section-title">{{ section_name }}</h2>
+
+            {% for item in section_content %}
+                {% if item.title is defined %}
+                {# 带标题的子项（工作经历、项目经历等） #}
+                <div class="subsection">
+                    {% set parts = item.title.split('|') %}
+                    <div class="subsection-title">
+                        <span>{{ parts[0] | trim }}</span>
+                        {% if parts | length > 2 %}
+                        <span class="date">{{ parts[2] | trim }}</span>
+                        {% endif %}
+                    </div>
+                    {% if parts | length > 1 %}
+                    <div class="subsection-subtitle">{{ parts[1] | trim }}</div>
+                    {% endif %}
+
+                    {% if item.content %}
+                    <ul>
+                        {% for line in item.content %}
+                        <li>{{ line }}</li>
+                        {% endfor %}
+                    </ul>
+                    {% endif %}
+                </div>
+
+                {% elif 'items' in item %}
+                {# 纯列表项 #}
+                <ul>
+                    {% for li in item['items'] %}
+                    <li>{{ li }}</li>
+                    {% endfor %}
+                </ul>
+
+                {% else %}
+                {# 键值对（基本信息） - 只有基本信息 section 使用 header 模板 #}
+                {% if section_name == '基本信息' %}
+                <div class="header">
+                    <h1>{{ item.get('姓名', '') }}</h1>
+                    <div class="contact">
+                        {% if item.get('电话') %}<span>{{ item['电话'] }}</span>{% endif %}
+                        {% if item.get('邮箱') %}<span>{{ item['邮箱'] }}</span>{% endif %}
+                        {% if item.get('GitHub') %}<span><a href="https://github.com/{{ item['GitHub'] }}">GitHub</a></span>{% endif %}
+                        {% if item.get('博客') %}<span><a href="{{ item['博客'] }}">Blog</a></span>{% endif %}
+                    </div>
+                </div>
+                {% else %}
+                {# 其他 section 的键值对用普通列表展示 #}
+                <ul>
+                    {% for key, value in item.items() %}
+                    <li><strong>{{ key }}</strong>：{{ value }}</li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+                {% endif %}
+            {% endfor %}
+        </div>
+        {% endfor %}
+    </div>
+</body>
+</html>
