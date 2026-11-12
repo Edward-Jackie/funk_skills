@@ -1,7 +1,0 @@
-{
-  "tool_name": "Bash",
-  "tool_input_preview": "{\"command\":\"ls /Users/edj/dev/ai_dev/resume-maker/node_modules/.bin/next 2>&1 && /Users/edj/dev/ai_dev/resume-maker/node_modules/.bin/next --version 2>&1\",\"description\":\"检查 next 二进制文件\"}",
-  "error": "Exit code 1\nls: /Users/edj/dev/ai_dev/resume-maker/node_modules/.bin/next: No such file or directory",
-  "timestamp": "2026-06-19T15:37:58.425Z",
-  "retry_count": 1
-}
