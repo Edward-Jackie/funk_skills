@@ -17,6 +17,7 @@ from typing import Any
 import yaml
 
 import map_home
+from graph_semantics import lifecycle_issues, rule_issues
 
 
 ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
@@ -498,6 +499,22 @@ class Validator:
             self.error(file, f"存在未声明环：{', '.join(sorted(component))}")
         for component in sorted(declared - actual, key=lambda item: sorted(item)):
             self.error(file, f"声明的环已不存在：{', '.join(sorted(component))}")
+
+        for problem in rule_issues([*nodes, *edges], graph.get("rule_definitions", [])):
+            self.error(file, f"{problem.get('object_id', graph_id)} {problem['code']}: {problem['message']}")
+        if layout.get("default") == "state":
+            lifecycle = graph.get("lifecycle")
+            if isinstance(lifecycle, dict):
+                lifecycle = {**lifecycle, "cycles": cycles}
+            transitions = [{**edge, "source": edge.get("from"), "target": edge.get("to")} for edge in edges if isinstance(edge, dict)]
+            for problem in lifecycle_issues(nodes, transitions, lifecycle):
+                self.error(file, f"{problem.get('object_id', graph_id)} {problem['code']}: {problem['message']}")
+            for node in nodes:
+                if isinstance(node, dict) and node.get("kind") not in {"state", "entry", "terminal", "decision"}:
+                    self.error(file, f"state 布局包含非状态节点：{node.get('id')}")
+            for edge in edges:
+                if isinstance(edge, dict) and edge.get("kind") != "transition":
+                    self.error(file, f"state 布局包含非迁移关系：{edge.get('id')}")
 
         evidence_conflicts = sum(
             1

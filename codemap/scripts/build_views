@@ -41,8 +41,8 @@ OVERLAP_CODES = {
     "composition/container-border-run",
 }
 
-# 编译器当前能渲染的 layout.default；其余（force / state）只在外壳导航里占位
-SUPPORTED_LAYOUTS = {"swimlane", "layered"}
+# force 仍只在外壳导航占位；state 复用 Archify lifecycle 自动布局。
+SUPPORTED_LAYOUTS = {"swimlane", "layered", "state"}
 CALL_TIMEOUT = 300
 
 
@@ -260,6 +260,7 @@ def shell_data(graphs: list[dict], results: dict[str, tuple[str, str]], out_dir:
                 "rendered": rendered,
                 "reason": reason,
                 "nodes": nodes,
+                "edges": [{"id": edge["id"]} for edge in g.get("edges") or []],
             }
         )
     return {"project": project, "graphs": items}

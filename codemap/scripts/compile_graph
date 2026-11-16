@@ -20,6 +20,8 @@ from pathlib import Path
 
 import yaml
 
+from graph_semantics import lifecycle_issues, rule_issues
+
 ID_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]*$")
 MAX_COL = 5  # archify workflow 的列上限
 MAX_STACK = 4  # 同泳道同列最多竖向堆叠的节点数
@@ -52,7 +54,7 @@ EDGE_STYLE = {
 }
 
 # Graph layout.default -> archify 图类型；其余暂不支持
-LAYOUT_TYPE = {"swimlane": "workflow", "layered": "workflow"}
+LAYOUT_TYPE = {"swimlane": "workflow", "layered": "workflow", "state": "lifecycle"}
 
 
 HEX40 = re.compile(r"^[a-fA-F0-9]{40}$")
@@ -230,10 +232,23 @@ def compile_graph(
     layout = graph.get("layout") or {}
     default = layout.get("default")
     if default not in LAYOUT_TYPE:
-        raise CompileError(f"暂不支持 layout.default={default}（v2 支持 swimlane / layered）")
+        raise CompileError(f"暂不支持 layout.default={default}（支持 swimlane / layered / state）")
 
-    nodes = graph.get("nodes") or []
+    nodes = [dict(node) for node in graph.get("nodes") or []]
     edges = graph.get("edges") or []
+    semantic_errors = rule_issues([*nodes, *edges], graph.get("rule_definitions", []))
+    is_lifecycle = default == "state"
+    lifecycle = graph.get("lifecycle")
+    if isinstance(lifecycle, dict):
+        lifecycle = {**lifecycle, "cycles": graph.get("cycles", [])}
+    if is_lifecycle:
+        semantic_errors.extend(lifecycle_issues(nodes, [{**edge, "source": edge.get("from"), "target": edge.get("to")} for edge in edges], lifecycle))
+        if any(node.get("kind") not in {"state", "entry", "terminal", "decision"} for node in nodes):
+            semantic_errors.append({"message": "state 布局只接受状态节点，过程/存储请放入联动视图"})
+        if any(edge.get("kind") != "transition" for edge in edges):
+            semantic_errors.append({"message": "state 布局只接受 transition 状态迁移"})
+    if semantic_errors:
+        raise CompileError("；".join(f"{item.get('object_id', graph['id'])}: {item['message']}" for item in semantic_errors))
     lanes_decl = layout.get("lanes") or []
     if lanes_decl:
         lanes = [
@@ -252,7 +267,9 @@ def compile_graph(
     repo = repository_meta(repo_root, graph) if repo_root else None
     if repo_root and repo is None:
         print(f"警告 {graph['id']}: {repo_root} 没有 origin 或取不到版本，源码锚点只进侧车，不进图", file=sys.stderr)
-    if direction == "TB":
+    if is_lifecycle:
+        a_lanes, phases, lane_of, cols, offsets = [], [], {}, {}, {}
+    elif direction == "TB":
         a_lanes, phases, lane_of, cols, offsets = assign_vertical(nodes, lanes, bool(lanes_decl))
     else:
         cols, offsets = assign_columns(nodes)
@@ -265,11 +282,12 @@ def compile_graph(
         refs = n.get("refs") or []
         item = {
             "id": nid,
-            "lane": lane_of[nid],
-            "col": cols[nid],
-            "type": NODE_TYPE.get(n.get("kind"), "backend"),
             "label": str(n["label"]),
         }
+        if is_lifecycle:
+            item["type"] = n.get("state_type") or ("start" if n.get("initial") else "neutral")
+        else:
+            item.update({"lane": lane_of[nid], "col": cols[nid], "type": NODE_TYPE.get(n.get("kind"), "backend")})
         if nid in offsets:
             item["yOffset"] = offsets[nid]
         sub = clip(n.get("detail"), sublabel_limit) if sublabel_limit > 0 else ""
@@ -298,6 +316,8 @@ def compile_graph(
             "context": n.get("context"),
             "sub": n.get("sub"),
             "rules": n.get("rules") or [],
+            "initial": n.get("initial"),
+            "terminal": n.get("terminal"),
         }
 
     a_edges, facts_edges = [], {}
@@ -313,7 +333,9 @@ def compile_graph(
         item = {"id": eid, "from": e["from"], "to": e["to"], "variant": variant}
         if label:
             item["label"] = label
-        if role:
+        if is_lifecycle and cond and cond != "always" and label != cond:
+            item["note"] = clip(cond, 32)
+        if role and not is_lifecycle:
             item["role"] = role
         a_edges.append(item)
         facts_edges[eid] = {
@@ -324,21 +346,25 @@ def compile_graph(
             "refs": e.get("refs") or [],
             "evidence": e.get("evidence"),
             "rules": e.get("rules") or [],
+            "source": e.get("from"),
+            "target": e.get("to"),
         }
 
     candidate = {
-        "schema_version": 2,
+        "schema_version": 3 if is_lifecycle else 2,
         "diagram_type": LAYOUT_TYPE[default],
         "meta": {
             "title": str(graph.get("title") or graph["id"]),
             "subtitle": clip(graph.get("summary"), 80),
             "output": f"{graph['id']}.html",
             "quality_profile": quality,
+            "locale": "zh-CN",
         },
-        "lanes": a_lanes,
-        "nodes": a_nodes,
-        "edges": a_edges,
     }
+    if is_lifecycle:
+        candidate.update({"mainPath": lifecycle["main_path"], "states": a_nodes, "transitions": a_edges})
+    else:
+        candidate.update({"lanes": a_lanes, "nodes": a_nodes, "edges": a_edges})
     if phases:
         candidate["phases"] = phases
     if repo:
@@ -355,7 +381,7 @@ def compile_graph(
     parent = graph.get("parent")
     if isinstance(parent, dict) and parent.get("graph"):
         remember_sibling(str(parent["graph"]))
-    graphs[str(graph["id"])] = sibling_meta(base_dir, str(graph["id"]))
+    graphs[str(graph["id"])] = {"id": graph["id"], "title": graph.get("title") or graph["id"], "kind": graph.get("kind"), "level": graph.get("level"), "status": graph.get("status"), "node_count": len(nodes), "edge_count": len(edges)}
     facts = {
         "schema": "codemap.facts/v1",
         "titles": titles,
@@ -374,6 +400,8 @@ def compile_graph(
         },
         "nodes": facts_nodes,
         "edges": facts_edges,
+        "rule_definitions": graph.get("rule_definitions", []),
+        "lifecycle": lifecycle if is_lifecycle else None,
     }
     return candidate, facts
 
@@ -414,7 +442,7 @@ def main() -> int:
         (out / f"{gid}.facts.json").write_text(
             json.dumps(facts, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
         )
-        print(f"ok {gid}: {len(candidate['nodes'])} 节点 / {len(candidate['edges'])} 边")
+        print(f"ok {gid}: {len(facts['nodes'])} 节点 / {len(facts['edges'])} 边（{candidate['diagram_type']}）")
     return 1 if failed else 0
 
 

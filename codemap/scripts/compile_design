@@ -1,0 +1,206 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["PyYAML>=6.0.2,<7"]
+# ///
+"""把工作台同源需求投影为 Archify 候选和侧车；不发布 MAP、不要求源码锚点。"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import runpy
+import sys
+from pathlib import Path
+from typing import Any
+
+from graph_semantics import lifecycle_issues, rule_issues
+
+COMPILER = runpy.run_path(str(Path(__file__).with_name("compile_graph")))
+ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$")
+RENDER_ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
+VIEWS = {"domain", "flow", "page"}
+KINDS = {"domain", "action", "state", "page", "rule", "field", "dialog"}
+MAX_BYTES = 2 * 1024 * 1024
+
+
+class DesignError(ValueError):
+    pass
+
+
+def render_ids(identifiers: list[str]) -> dict[str, str]:
+    """不收窄规范 ID；只给渲染器不接受的 ID 编码，且避让现有规范 ID。"""
+    occupied = set(identifiers)
+    result: dict[str, str] = {}
+    for identifier in identifiers:
+        if RENDER_ID_RE.fullmatch(identifier):
+            result[identifier] = identifier
+            continue
+        candidate = "cm_id_" + identifier.encode("utf-8").hex()
+        while candidate in occupied:
+            candidate += "_"
+        occupied.add(candidate)
+        result[identifier] = candidate
+    return result
+
+
+def compile_design(document: dict[str, Any], view: str, scenario_id: str | None, quality: str) -> tuple[dict, dict, list[str]]:
+    if not isinstance(document, dict) or document.get("schema") != 1:
+        raise DesignError("需求必须使用工作台 schema=1")
+    identifier = document.get("id")
+    if not isinstance(identifier, str) or not ID_RE.fullmatch(identifier):
+        raise DesignError("需求 ID 格式不合法")
+    if type(document.get("version")) is not int or document["version"] < 1 or type(document.get("revision")) is not int or document["revision"] < 1:
+        raise DesignError("需求必须包含有效 version 与 revision")
+    if view not in VIEWS:
+        raise DesignError("设计视图不合法")
+    collections: dict[str, list[dict]] = {}
+    all_ids: set[str] = set()
+    for name in ("objects", "relations", "scenarios", "contracts"):
+        values = document.get(name, [])
+        if not isinstance(values, list) or len(values) > 500:
+            raise DesignError(f"{name} 必须是至多 500 项的列表")
+        for value in values:
+            current = value.get("id") if isinstance(value, dict) else None
+            if not isinstance(current, str) or not ID_RE.fullmatch(current) or current in all_ids:
+                raise DesignError(f"{name} 存在无效或重复 ID：{current}")
+            all_ids.add(current)
+        collections[name] = values
+    objects = {obj["id"]: obj for obj in collections["objects"]}
+    relations = collections["relations"]
+    registry = [obj for obj in objects.values() if obj.get("kind") == "rule"]
+    for obj in objects.values():
+        if obj.get("kind") not in KINDS or not isinstance(obj.get("label"), str) or not obj["label"].strip() or not isinstance(obj.get("views"), list) or any(item not in VIEWS for item in obj["views"]):
+            raise DesignError(f"对象类型、标题或视图不合法：{obj['id']}")
+        if obj.get("domain_id") and objects.get(obj["domain_id"], {}).get("kind") != "domain":
+            raise DesignError(f"Domain 引用不存在：{obj['id']}")
+    for relation in relations:
+        if relation.get("source") not in objects or relation.get("target") not in objects:
+            raise DesignError(f"关系引用不存在：{relation['id']}")
+        if relation.get("kind") not in {"transition", "call", "event", "association"}:
+            raise DesignError(f"关系类型不合法：{relation['id']}")
+        if not isinstance(relation.get("condition"), str) or not relation["condition"].strip():
+            raise DesignError(f"关系缺少明确条件：{relation['id']}")
+        if relation.get("action_id") and objects.get(relation["action_id"], {}).get("kind") != "action":
+            raise DesignError(f"迁移动作不存在：{relation['id']}")
+        if relation["kind"] == "transition" and any(objects[relation[key]]["kind"] != "state" for key in ("source", "target")):
+            raise DesignError(f"迁移起止不是状态：{relation['id']}")
+    owners = []
+    for item in [*objects.values(), *relations]:
+        refs = item.get("rule_refs", [])
+        if not isinstance(refs, list) or any(not isinstance(ref, dict) for ref in refs):
+            raise DesignError(f"设计规则引用必须含 id、version：{item['id']}")
+        owners.append({"id": item["id"], "rules": refs})
+    problems = rule_issues(owners, registry)
+    lifecycle = document.get("lifecycle")
+    if not isinstance(lifecycle, dict) or lifecycle.get("applicability") not in {"applicable", "not-applicable", "unknown"}:
+        raise DesignError("需求必须声明生命周期适用性")
+    states = [obj for obj in objects.values() if obj["kind"] == "state"]
+    transitions = [relation for relation in relations if relation["kind"] == "transition"]
+    if lifecycle["applicability"] == "applicable":
+        problems.extend(lifecycle_issues(states, transitions, lifecycle))
+    elif states or transitions:
+        raise DesignError("存在状态或迁移时，必须先明确生命周期适用性")
+    if problems:
+        raise DesignError("；".join(f"{item.get('object_id', identifier)} {item['code']}: {item['message']}" for item in problems))
+    selected_scenario = None
+    scenario_scope: set[str] = set()
+    scenario_relations: set[str] = set()
+    if scenario_id:
+        selected_scenario = next((item for item in collections["scenarios"] if item["id"] == scenario_id), None)
+        if not selected_scenario:
+            raise DesignError(f"场景不存在：{scenario_id}")
+        for step in selected_scenario.get("steps", []):
+            if step.get("object_id") not in objects:
+                raise DesignError("场景步骤存在无效对象")
+            scenario_scope.add(step["object_id"])
+            if step.get("relation_id"):
+                scenario_relations.add(step["relation_id"])
+        for relation in relations:
+            if relation["id"] in scenario_relations:
+                scenario_scope.update((relation["source"], relation["target"]))
+        for obj in list(objects.values()):
+            if obj["id"] in scenario_scope:
+                if obj.get("domain_id"):
+                    scenario_scope.add(obj["domain_id"])
+                scenario_scope.update(rule["id"] for rule in obj.get("rule_refs", []))
+    warnings = ["设计投影只表达需求；流程演示不代表实现或真实业务验证。"]
+    state_view = view == "flow" and lifecycle["applicability"] == "applicable"
+    if state_view:
+        visible, visible_relations = states, transitions
+        if scenario_id:
+            warnings.append("生命周期保留完整初终状态；选定场景以侧栏关联与主路径提示，不删除其他合法状态。")
+    else:
+        visible = [obj for obj in objects.values() if view in obj["views"] and (not scenario_id or obj["id"] in scenario_scope)]
+        visible_ids = {obj["id"] for obj in visible}
+        visible_relations = [relation for relation in relations if view in relation.get("views", []) and relation["source"] in visible_ids and relation["target"] in visible_ids]
+    if not visible:
+        raise DesignError("当前场景在该视图没有可呈现对象，请切换关联视图")
+    if len(visible) > 18:
+        raise DesignError("当前设计范围超过 18 个节点，请按场景缩小范围后导出")
+    mapping = render_ids([*objects, *(item["id"] for item in relations)])
+    graph_id = f"design-{identifier}-{view}"
+    node_ids = {obj["id"] for obj in visible}
+    levels = {identifier: 0 for identifier in node_ids}
+    # 只用于派生布局；有环时保留声明顺序，绝不写回业务定义。
+    pending = set(node_ids)
+    for _ in range(len(node_ids)):
+        ready = [identifier for identifier in pending if all(edge["source"] not in pending for edge in visible_relations if edge["target"] == identifier)]
+        if not ready:
+            break
+        for current in ready:
+            parents = [edge["source"] for edge in visible_relations if edge["target"] == current]
+            levels[current] = max((levels[parent] + 1 for parent in parents), default=0)
+            pending.remove(current)
+    domain_ids = list(dict.fromkeys(obj.get("domain_id") or (obj["id"] if obj["kind"] == "domain" else "") for obj in visible))
+    lanes = [{"id": "lane_" + mapping[domain] if domain else "main", "label": objects[domain]["label"] if domain else "关联对象", "order": index} for index, domain in enumerate(domain_ids)]
+    graph = {"id": graph_id, "title": document.get("title") or identifier, "summary": document.get("goal", ""), "kind": "state" if state_view else "business", "level": "summary" if len(visible) <= 12 else "detail", "status": "proposal", "domain": "design", "layout": {"default": "state" if state_view else "swimlane", "direction": "LR", "lanes": [] if state_view else lanes}, "rule_definitions": registry, "cycles": [], "nodes": [], "edges": []}
+    for obj in visible:
+        domain = obj.get("domain_id") or (obj["id"] if obj["kind"] == "domain" else "")
+        graph["nodes"].append({"id": mapping[obj["id"]], "label": obj["label"], "kind": "state" if state_view else "entry" if obj["kind"] in {"page", "dialog"} else "process", "level": levels[obj["id"]] + 1, "lane": "lane_" + mapping[domain] if domain else "main", "detail": obj.get("description", ""), "tags": [obj["kind"]], "refs": [], "rules": obj.get("rule_refs", []), "initial": obj.get("initial", False), "terminal": obj.get("terminal", False), "state_type": obj.get("state_type"), "evidence": {"level": "unverified", "note": "来自需求草稿；不是实现或业务验证结论"}})
+    for relation in visible_relations:
+        graph["edges"].append({"id": mapping[relation["id"]], "from": mapping[relation["source"]], "to": mapping[relation["target"]], "label": relation["label"], "kind": "transition" if state_view else "async" if relation["kind"] == "event" else "sync", "condition": relation["condition"], "detail": relation.get("failure_impact", ""), "refs": [], "rules": relation.get("rule_refs", []), "evidence": {"level": "unverified", "note": "来自需求草稿；尚未运行真实场景"}})
+    if state_view:
+        graph["lifecycle"] = {**lifecycle, "initial_state_id": mapping[lifecycle["initial_state_id"]], "terminal_state_ids": [mapping[item] for item in lifecycle["terminal_state_ids"]], "main_path": [mapping[item] for item in lifecycle["main_path"]]}
+        graph["cycles"] = [{**cycle, "nodes": [mapping[item] for item in cycle["nodes"]]} for cycle in lifecycle.get("cycles", [])]
+    candidate, facts = COMPILER["compile_graph"](graph, quality, None, Path.cwd(), 0)
+    facts["graph"].update({"mode": "design", "requirement_id": identifier, "version": document["version"], "revision": document["revision"]})
+    facts["id_map"] = {"canonical_to_render": mapping, "render_to_canonical": {value: key for key, value in mapping.items()}}
+    facts["design"] = {"requirement_id": identifier, "version": document["version"], "revision": document["revision"], "source": document.get("source"), "view": view, "scenario": selected_scenario, "contracts": collections["contracts"], "warnings": warnings}
+    for obj in visible:
+        facts["nodes"][mapping[obj["id"]]].update({"original_id": obj["id"], "design": obj})
+    for relation in visible_relations:
+        facts["edges"][mapping[relation["id"]]].update({"original_id": relation["id"], "design": relation, "action": objects.get(relation.get("action_id"))})
+    return candidate, facts, warnings
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("input", type=Path)
+    parser.add_argument("--out-dir", required=True, type=Path)
+    parser.add_argument("--view", choices=sorted(VIEWS), default="flow")
+    parser.add_argument("--scenario")
+    parser.add_argument("--quality", choices=["standard", "showcase"], default="standard")
+    args = parser.parse_args()
+    try:
+        raw = args.input.read_bytes()
+        if len(raw) > MAX_BYTES:
+            raise DesignError("需求 JSON 超过 2 MiB，请按范围读取")
+        document = json.loads(raw, parse_constant=lambda value: (_ for _ in ()).throw(DesignError(f"不支持 JSON 常量：{value}")))
+        candidate, facts, warnings = compile_design(document, args.view, args.scenario, args.quality)
+        output = args.out_dir.resolve()
+        output.mkdir(parents=True, exist_ok=True)
+        stem = facts["graph"]["id"]
+        candidate_path, facts_path = output / f"{stem}.candidate.json", output / f"{stem}.facts.json"
+        candidate_path.write_text(json.dumps(candidate, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        facts_path.write_text(json.dumps(facts, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        print(json.dumps({"ok": True, "diagram_type": candidate["diagram_type"], "candidate": str(candidate_path), "facts": str(facts_path), "requirement_id": document["id"], "version": document["version"], "revision": document["revision"], "design": True, "warnings": warnings}, ensure_ascii=False))
+        return 0
+    except (ValueError, OSError, KeyError, TypeError, COMPILER["CompileError"]) as exc:
+        print(json.dumps({"ok": False, "error": str(exc), "code": "design.compile.invalid"}, ensure_ascii=False))
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

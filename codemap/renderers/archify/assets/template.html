@@ -5612,7 +5612,22 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         .replace(/\b\w/g, function (letter) { return letter.toUpperCase(); });
     }
 
+    // 渲染器内部 ID 可编码；对外链接始终使用需求的规范对象 ID。
+    function readerCanonicalId(id) {
+      return Archify.codemapIds && Archify.codemapIds.render_to_canonical[id] || id;
+    }
+    function readerRenderId(id) {
+      return Archify.codemapIds && Archify.codemapIds.canonical_to_render[id] || id;
+    }
+    function canonicalReaderState(state) {
+      if (!Archify.codemapIds) return state;
+      var params = new URLSearchParams(state);
+      ['focus', 'relation'].forEach(function (key) { if (params.has(key)) params.set(key, readerCanonicalId(params.get(key))); });
+      if (params.has('route')) params.set('route', params.get('route').split('~').map(readerCanonicalId).join('~'));
+      return params.toString();
+    }
     function readerLink(state) {
+      state = canonicalReaderState(state);
       var template = document.documentElement.getAttribute('data-reading-link-template');
       if (template === null) return location.href.replace(/#.*$/, '') + '#' + state;
       if (!template || template.length > 4096 || template.split('{state}').length !== 2) return null;
@@ -8483,7 +8498,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         }
         if (options.updateUrl === true && activeIds.length === 1) {
           try {
-            history.replaceState(null, '', location.pathname + location.search + '#focus=' + encodeURIComponent(activeIds[0]));
+            history.replaceState(null, '', location.pathname + location.search + '#focus=' + encodeURIComponent(readerCanonicalId(activeIds[0])));
           } catch (_) {}
         }
       }
@@ -8560,7 +8575,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         if (options.updateUrl !== false) {
           try {
             history.replaceState(null, '', location.pathname + location.search + '#focus=' +
-              encodeURIComponent(activeIds[0]) + '&reach=' + direction);
+              encodeURIComponent(readerCanonicalId(activeIds[0])) + '&reach=' + direction);
           } catch (_) {}
         }
         if (options.reveal !== false && Archify.view && typeof Archify.view.reveal === 'function') {
@@ -9147,7 +9162,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         });
         revealPinnedRelationship(record);
         if (options.updateUrl !== false && record.id) {
-          try { history.replaceState(null, '', location.pathname + location.search + '#relation=' + encodeURIComponent(record.id)); } catch (_) {}
+          try { history.replaceState(null, '', location.pathname + location.search + '#relation=' + encodeURIComponent(readerCanonicalId(record.id))); } catch (_) {}
         }
         return true;
       }
@@ -9715,7 +9730,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         if (options.updateUrl !== false) {
           var key = options.urlKey || 'focus';
           var value = options.urlValue || normalized[0];
-          try { history.replaceState(null, '', location.pathname + location.search + '#' + key + '=' + encodeURIComponent(value)); } catch (_) {}
+          try { history.replaceState(null, '', location.pathname + location.search + '#' + key + '=' + encodeURIComponent(readerCanonicalId(value))); } catch (_) {}
         }
         return true;
       }
@@ -9896,8 +9911,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       function syncFocusFromHash() {
         try {
           var params = new URLSearchParams(location.hash.replace(/^#/, ''));
-          var relation = params.get('relation');
-          var initial = params.get('focus');
+          var relation = readerRenderId(params.get('relation'));
+          var initial = readerRenderId(params.get('focus'));
           var reach = params.get('reach');
           if (relation) {
             if (html.getAttribute('data-embed') === 'true' ||
@@ -11099,6 +11114,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       var state = { scale: 1, x: 0, y: 0, mode: 'overview' };
       var minimumZoom = 0.25;
       var maximumZoom = 3;
+      var codemapMode = false;
+      var spacePan = false;
       var drag = null;
       var cameraTimer = null;
       var cameraFrame = null;
@@ -11114,6 +11131,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       var viewBox = svg.viewBox && svg.viewBox.baseVal;
 
       function clamp() {
+        // Codemap 的指针锚点和平移属于视口，不用整图居中覆盖用户位置。
+        if (codemapMode) return;
         var width = svg.clientWidth || 1;
         var height = svg.clientHeight || 1;
         if (state.scale < 1) {
@@ -11239,6 +11258,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       // outer page-flow box for long ordinary diagrams, never the SVG itself:
       // changing its height would feed the smaller size back into camera math.
       function ordinaryPage() {
+        if (codemapMode) return false;
         var html = document.documentElement;
         return html.getAttribute('data-embed') !== 'true' &&
           html.getAttribute('data-present') !== 'true' &&
@@ -11286,7 +11306,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         renderControls();
         outBtn.disabled = state.scale <= minimumZoom;
         inBtn.disabled = state.scale >= maximumZoom;
-        container.classList.toggle('is-pannable', state.scale > 1);
+        container.classList.toggle('is-pannable', codemapMode || state.scale > 1);
         if (Archify.radar && typeof Archify.radar.sync === 'function') Archify.radar.sync();
         if (Archify.viewerChromeLayout && typeof Archify.viewerChromeLayout.schedule === 'function') {
           Archify.viewerChromeLayout.schedule();
@@ -11382,7 +11402,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         var previous = state.scale;
         next = Math.max(minimumZoom, Math.min(maximumZoom, Math.round(next * 4) / 4));
         if (next === previous) return;
-        var longDiagram = svg.clientHeight > window.innerHeight && Math.min(previous, next) < 1;
+        var longDiagram = !codemapMode && svg.clientHeight > window.innerHeight && Math.min(previous, next) < 1;
         var before = longDiagram ? svg.getBoundingClientRect() : null;
         var anchorY = before ? Math.max(0, Math.min(window.innerHeight, before.bottom) + Math.max(0, before.top)) / 2 : 0;
         if (before && (before.bottom <= 0 || before.top >= window.innerHeight)) anchorY = window.innerHeight / 2;
@@ -11402,6 +11422,22 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
             : documentTop + state.y + logicalY * next - anchorY;
           window.scrollTo({ left: window.scrollX, top: Math.max(0, pageY), behavior: 'instant' });
         }
+      }
+      function zoomAt(next, clientX, clientY) {
+        // 从当前绘制位置计算锚点；连续滚轮不复用按钮的四分之一档位。
+        interruptCamera('wheel');
+        var previous = state.scale;
+        next = Math.max(minimumZoom, Math.min(maximumZoom, Number(next)));
+        if (!Number.isFinite(next) || next === previous) return;
+        var rect = svg.getBoundingClientRect();
+        var baseX = rect.left - state.x;
+        var baseY = rect.top - state.y;
+        var logicalX = (clientX - rect.left) / previous;
+        var logicalY = (clientY - rect.top) / previous;
+        state.scale = next;
+        state.x = clientX - baseX - logicalX * next;
+        state.y = clientY - baseY - logicalY * next;
+        apply();
       }
       function reset(options) {
         options = options || {};
@@ -11645,12 +11681,21 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       outBtn.addEventListener('click', function () { zoom(state.scale - 0.25); });
       resetBtn.addEventListener('click', reset);
       container.addEventListener('pointerdown', function (event) {
-        if (state.scale <= 1 || event.button !== 0 || event.target.closest('.diagram-nav, .focus-chip, .node-finder, .diagram-guide, .overview-map, .route-probe, .semantic-lens') || event.target.closest('[data-node-id]') || event.target.closest('[data-relationship-hit-key]')) return;
+        if ((!codemapMode && state.scale <= 1) || event.button !== 0 || event.target.closest('button, input, textarea, select, [contenteditable], [role="dialog"], [role="menu"], .diagram-nav, .focus-chip, .node-finder, .diagram-guide, .overview-map, .route-probe, .semantic-lens, .cm-panel')) return;
+        if ((!codemapMode || !spacePan) && event.target.closest('[data-node-id], [data-relationship-hit-key], [data-edge-id]')) return;
+        if (codemapMode && spacePan) { event.preventDefault(); event.stopPropagation(); }
         interruptCamera();
         drag = { startX: event.clientX, startY: event.clientY, x: state.x, y: state.y, moved: false };
         container.classList.add('is-panning');
         try { container.setPointerCapture(event.pointerId); } catch (_) {}
-      });
+      }, true);
+      document.addEventListener('keydown', function (event) {
+        if (!codemapMode || event.code !== 'Space' || event.target.closest('button, a, input, textarea, select, [contenteditable], [role="menu"], [role="dialog"]')) return;
+        spacePan = true;
+        if (container.contains(event.target)) { event.preventDefault(); event.stopPropagation(); }
+      }, true);
+      document.addEventListener('keyup', function (event) { if (event.code === 'Space') spacePan = false; });
+      window.addEventListener('blur', function () { spacePan = false; drag = null; container.classList.remove('is-panning'); });
       container.addEventListener('pointermove', function (event) {
         if (!drag) return;
         var dx = event.clientX - drag.startX;
@@ -11693,6 +11738,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       return {
         zoomIn: function () { zoom(state.scale + 0.25); },
         zoomOut: function () { zoom(state.scale - 0.25); },
+        zoomAt: zoomAt,
+        enableCodemap: function () { codemapMode = true; apply(); },
         reset: reset,
         reveal: reveal,
         centerAt: centerAt,
@@ -12997,7 +13044,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       }
       function replaceRouteHash(value) {
         try {
-          history.replaceState(null, '', location.pathname + location.search + (value ? '#route=' + value : ''));
+          history.replaceState(null, '', location.pathname + location.search + (value ? '#' + canonicalReaderState('route=' + value) : ''));
         } catch (_) {}
       }
       function renderPlaceholder(copy) {
@@ -13728,7 +13775,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
             if (mode !== 'idle') clear({ updateUrl: false, restoreFocus: false });
             return;
           }
-          var parts = route.split('~');
+          var parts = route.split('~').map(readerRenderId);
           if (parts.length !== 2) return;
           var byId = nodesById();
           if (!byId[parts[0]] || !byId[parts[1]]) return;

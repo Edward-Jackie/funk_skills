@@ -11,6 +11,8 @@ description: >
 
 Git push 时可由 Codemap pre-push hook 自动检查结构与新鲜度；它只提醒，不代替语义日志和地图维护。完成新项目地图初始化后，按日志契约接入同一 hook，不另装客户端生命周期 hooks。
 
+V4.2 开发分支已接入 MAP 画布交互：画布内普通滚轮按指针缩放，侧栏/输入/菜单保持正常滚动；空白拖拽或空格加拖拽平移，右键与工具栏更多按钮共用阅读动作。认证工作台宿主显式授予能力后，菜单可发起需求草稿；独立图保持只读。已有 HTML 需重新构建才带入这些能力，不能把本地实现当成部署完成。当前实施停在 S2：画布交互、生命周期编译与设计投影已完成本地阶段验证；S3 对象评注/提案/确认及后续证据/回填未实施。
+
 CODEMAP 是带证据的导航缓存，不替代源码、测试、运行环境或人工确认的业务要求。让下一次冷启动能在两步内从任务或故障现象走到首个可靠代码锚点，并在高风险业务中看见不能破坏的规则。
 
 4.0 的结构：**Codemap 管事实，Archify 管呈现**。地图事实保存在 `~/.codemap/maps/<project>/<branch>/`（兼容旧 `.map/`）的 Markdown 与 Graph 中；图是由 Graph 单向编译出的派生产物，渲染器是内置的 Archify 分支（`renderers/archify/`，Apache-2.0，改动见 [Archify 集成](references/archify-integration.md)）。原 Explorer 前端已退役。
@@ -110,7 +112,8 @@ MCP 读取不修改权威日志或地图；新日志 Core 在服务仓，地图�
 
 - **已支持**：`layout.default` 为 `swimlane` / `layered` 的 Graph（编译为 Archify workflow）。所有图从入口层开始排：`direction: LR` 入口在最左、入口泳道在最上；`TB` 入口在最上（level 成行、泳道成列，最多 6 条泳道）。`level` 压缩到 6 列，同泳道同列最多堆叠 4 个节点，超出时编译报错并提示拆 detail 图。
 - **已支持（v3.1）**：`check_map.sh --age` 的新鲜度守卫（领先提交、基线天数、失效锚点，过期直接失败）；`query_graph` / `impact_diff` 的前置新鲜度横幅；MCP 只读取数层（9 个工具，统一 freshness 信封，写入默认关闭）。
-- **未支持**：`state`（生命周期）与 `force` 布局的 Graph 会被跳过并列入汇总；需求 Overlay 的三镜头渲染、力导向发现图、提交钩子自动更新；Graph 的 `rules` 绑定字段已透传到侧车，但 `check_graph` 尚未校验它；**画布批注图层与 Overlay 涂层**（`build_views`/`compile_graph` 尚无 overlay 参数，页面上做不出任何涂层，排在 v3.2）。
+- **已支持（V4.2 开发分支）**：显式初终状态/主路径的 `state` Graph 编译为 Archify lifecycle，Mermaid 为 stateDiagram-v2；结构化 rules 引用严格校验 ID/版本，旧字符串兼容。`scripts/compile_design` 从工作台 schema=1 导出三视图候选/侧车，无源码也可用，始终标为需求设计；不写实现 MAP，详见 [设计投影](references/archify-integration.md#设计投影v42-开发分支)。
+- **未支持**：`force` 布局会跳过并列入汇总；需求 Overlay 的三镜头渲染、力导向发现图、提交钩子自动更新；**实现 MAP 的自由画布批注与 Overlay 涂层**（`build_views`/`compile_graph` 尚无 overlay 参数）。工作台对象评注由服务仓分阶段接入，不能与旧 Overlay 图层混为一项。
 - **无 Graph 源头的图类型**（erd、class、tree、timeline、waterfall、explainer）：不经 Graph 编译，需要时直接用内置 Archify 按其 SKILL 流程出图，不进下钻外壳。
 - 版本路线、v4.0 布局与 MCP 边界见 [改造方向与分层契约](references/product-direction.md)。
 - 渲染链路的完整边界与待办见 [Archify 集成](references/archify-integration.md)。

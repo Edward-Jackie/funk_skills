@@ -1,23 +1,17 @@
-diff --color -ruN a/bin/archify.mjs b/bin/archify.mjs
---- a/bin/archify.mjs	2026-10-30 11:26:46
-+++ b/bin/archify.mjs	2026-10-30 11:10:04
+--- a/bin/archify.mjs
++++ b/bin/archify.mjs
 @@ -1,6 +1,7 @@
  #!/usr/bin/env node
- 
+
  import { spawnSync } from 'node:child_process';
 +import { codemapFactsPath, loadCodemapFacts } from '../renderers/shared/codemap-facts.mjs';
  import { createHash, randomUUID } from 'node:crypto';
  import fs from 'node:fs';
  import os from 'node:os';
-@@ -4850,6 +4851,34 @@
-           subject: { input: inputPath },
-           evidence: { ...(error?.code ? { systemCode: error.code } : {}), reason: error.message },
-           supportedFixes: ['choose a writable output directory on the target filesystem'],
-+        })],
-+      });
-+      return;
-+    }
-+
+@@ -4855,6 +4856,34 @@
+       return;
+     }
+
 +    // Codemap 事实侧车随规格一起冻结进暂存目录，渲染器按快照旁的同名侧车注入
 +    try {
 +      const codemapFacts = loadCodemapFacts(inputPath);
@@ -41,12 +35,16 @@ diff --color -ruN a/bin/archify.mjs b/bin/archify.mjs
 +          subject: { input: inputPath },
 +          evidence: { ...(error?.code ? { systemCode: error.code } : {}), reason: error.message },
 +          supportedFixes: ['repair or remove the .facts.json sidecar beside the candidate'],
-         })],
-       });
-       return;
-diff --color -ruN a/renderers/shared/cli.mjs b/renderers/shared/cli.mjs
---- a/renderers/shared/cli.mjs	2026-10-30 11:26:46
-+++ b/renderers/shared/cli.mjs	2026-10-30 11:06:29
++        })],
++      });
++      return;
++    }
++
+     let preparedBundlePath;
+     if (explainerBundle) {
+       try {
+--- a/renderers/shared/cli.mjs
++++ b/renderers/shared/cli.mjs
 @@ -1,4 +1,5 @@
  import { softwareNoticesHtml } from './software-notices.mjs';
 +import { injectCodemapFacts, loadCodemapFacts } from './codemap-facts.mjs';
@@ -65,270 +63,805 @@ diff --color -ruN a/renderers/shared/cli.mjs b/renderers/shared/cli.mjs
    const outputRequest = {
      requestedOutput: argv[3],
      authoredOutput: diagram.meta?.output,
-diff --color -ruN a/renderers/shared/codemap-facts.mjs b/renderers/shared/codemap-facts.mjs
---- a/renderers/shared/codemap-facts.mjs	1970-01-01 08:00:00
-+++ b/renderers/shared/codemap-facts.mjs	2026-10-30 11:05:37
-@@ -0,0 +1,263 @@
-+// Codemap 事实侧车：把 <name>.facts.json 内嵌进页面，并追加只读的 Passport 扩展。
-+// 无侧车时不做任何事，输出与原版一致。
-+import fs from 'node:fs';
-+import path from 'node:path';
+--- a/renderers/shared/codemap-facts.mjs
++++ b/renderers/shared/codemap-facts.mjs
+@@ -1,270 +1,8 @@
+ // Codemap 事实侧车：把 <name>.facts.json 内嵌进页面，并追加只读的 Passport 扩展。
+-// 无侧车时不做任何事，输出与原版一致。
++// 无侧车时不注入扩展，保留原有阅读行为。
+ import fs from 'node:fs';
+ import path from 'node:path';
+-
+-const FACTS_SUFFIX = '.facts.json';
+-
+-// 候选 <name>.candidate.json 或 <name>.json 对应的侧车路径
+-export function codemapFactsPath(inputPath) {
+-  const dir = path.dirname(inputPath);
+-  const base = path.basename(inputPath).replace(/\.candidate\.json$/, '').replace(/\.json$/, '');
+-  return path.join(dir, `${base}${FACTS_SUFFIX}`);
+-}
+-
+-// 内嵌 JSON 时转义 < > & 与 {{，避免提前结束脚本块或命中模板占位符
+-function serializeFacts(value) {
+-  return JSON.stringify(value)
+-    .replace(/</g, '\\u003c')
+-    .replace(/>/g, '\\u003e')
+-    .replace(/&/g, '\\u0026')
+-    .replace(/\u2028/g, '\\u2028')
+-    .replace(/\u2029/g, '\\u2029')
+-    .replace(/\{\{/g, '{\\u007b');
+-}
+-
+-const STYLE = `
+-    .cm-panel { margin-top: 0.52rem; padding: 0.5rem; max-height: 15rem; overflow: auto; border: 1px solid color-mix(in srgb, var(--cloud-stroke) 38%, var(--toolbar-border)); border-radius: 0.55rem; background: color-mix(in srgb, var(--cloud-fill) 14%, var(--panel)); font-size: 0.625rem; line-height: 1.5; color: var(--text-muted); }
+-    .cm-panel[hidden] { display: none; }
+-    html[data-preset="blueprint"] .cm-panel { border-radius: 0.18rem; }
+-    .cm-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.3rem; }
+-    .cm-eyebrow { color: var(--cloud-stroke); font-size: 0.5rem; font-weight: 800; letter-spacing: 0.08em; }
+-    .cm-detail { margin: 0 0 0.35rem; color: var(--text); white-space: pre-wrap; word-break: break-word; }
+-    .cm-chips { display: flex; flex-wrap: wrap; gap: 0.24rem; margin-bottom: 0.35rem; }
+-    .cm-chip { padding: 0.12rem 0.34rem; border: 1px solid color-mix(in srgb, var(--toolbar-border) 82%, transparent); border-radius: 999px; background: color-mix(in srgb, var(--panel) 68%, transparent); color: var(--text-faint); font-size: 0.5rem; letter-spacing: 0.04em; }
+-    .cm-chip[data-tone="ok"] { border-color: color-mix(in srgb, var(--backend-stroke) 55%, var(--toolbar-border)); color: var(--backend-stroke); }
+-    .cm-chip[data-tone="warn"] { border-color: color-mix(in srgb, var(--security-stroke, #f59e0b) 60%, var(--toolbar-border)); color: var(--security-stroke, #f59e0b); }
+-    .cm-chip[data-tone="bad"] { border-color: #ef4444; color: #ef4444; }
+-    .cm-chip[data-tone="mute"] { opacity: 0.7; }
+-    .cm-sec { margin-top: 0.35rem; }
+-    .cm-sec > b { display: block; color: var(--text-faint); font-size: 0.5rem; font-weight: 800; letter-spacing: 0.08em; }
+-    .cm-ref { display: block; margin-top: 0.12rem; word-break: break-all; }
+-    .cm-ref code { color: var(--text); font-size: inherit; }
+-    .cm-ref small { color: var(--cloud-stroke); font-size: inherit; }
+-    .cm-cond { margin: 0 0 0.35rem; color: var(--text); font-weight: 700; }
+-    .cm-go { appearance: none; padding: 0.2rem 0.55rem; border: 1px solid color-mix(in srgb, var(--cloud-stroke) 55%, var(--toolbar-border)); border-radius: 999px; background: transparent; color: var(--cloud-stroke); font: inherit; font-size: 0.55rem; font-weight: 700; cursor: pointer; }
+-    .cm-go:hover, .cm-go:focus-visible { background: color-mix(in srgb, var(--cloud-stroke) 16%, transparent); outline: 2px solid var(--cloud-stroke); outline-offset: 1px; }
+-    .cm-crumb { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin: 0 0 0.5rem; font-size: 0.6rem; color: var(--text-muted); }
+-    html[data-embed="true"] .cm-crumb { display: none; }
+-`;
+-
+-const SCRIPT = `
+-(function () {
+-  'use strict';
+-  var dataEl = document.getElementById('codemap-facts-data');
+-  if (!dataEl) return;
+-  var facts;
+-  try { facts = JSON.parse(dataEl.textContent); } catch (_) { return; }
+-  var chip = document.getElementById('focus-chip');
+-  var summary = document.getElementById('focus-summary');
+-  var container = document.querySelector('.diagram-container');
+-  var svg = container && container.querySelector('svg');
+-  if (!chip || !summary || !svg) return;
+-
+-  var graph = facts.graph || {};
+-  var titles = facts.titles || {};
+-  var panel = document.createElement('div');
+-  panel.id = 'codemap-facts-panel';
+-  panel.className = 'cm-panel';
+-  panel.setAttribute('role', 'region');
+-  panel.setAttribute('aria-label', 'Codemap 业务事实');
+-  panel.hidden = true;
+-  summary.parentNode.insertBefore(panel, summary);
+-
+-  var EVIDENCE_TONE = { 'runtime-verified': 'ok', 'source-verified': 'ok', 'human-confirmed': 'ok', 'inferred': 'warn', 'unverified': 'warn', 'conflict': 'bad' };
+-  var STATUS_TONE = { current: 'ok', 'needs-review': 'warn', stale: 'warn', conflict: 'bad' };
+-
+-  function el(tag, cls, text) {
+-    var node = document.createElement(tag);
+-    if (cls) node.className = cls;
+-    if (text != null) node.textContent = text;
+-    return node;
+-  }
+-  function chipEl(text, tone) {
+-    var c = el('span', 'cm-chip', text);
+-    if (tone) c.setAttribute('data-tone', tone);
+-    return c;
+-  }
+-  function subGraphId(sub) {
+-    if (!sub || typeof sub !== 'string') return null;
+-    return sub.split('/').pop().replace(/\\.ya?ml$/, '');
+-  }
+-  function navigate(graphId, nodeId) {
+-    if (window.parent && window.parent !== window) {
+-      window.parent.postMessage({ source: 'codemap', type: 'open', graph: graphId, node: nodeId || null }, '*');
+-      return;
+-    }
+-    location.href = graphId + '.html' + (nodeId ? '#focus=' + encodeURIComponent(nodeId) : '');
+-  }
+-  function goButton(text, graphId, nodeId) {
+-    var b = el('button', 'cm-go', text);
+-    b.type = 'button';
+-    b.addEventListener('click', function () { navigate(graphId, nodeId); });
+-    return b;
+-  }
+-  function evidenceBlock(evidence) {
+-    if (!evidence || !evidence.level) return null;
+-    var sec = el('div', 'cm-sec');
+-    sec.appendChild(el('b', null, '证据'));
+-    var row = el('div', 'cm-chips');
+-    row.appendChild(chipEl(evidence.level, EVIDENCE_TONE[evidence.level] || null));
+-    sec.appendChild(row);
+-    if (evidence.note) sec.appendChild(el('div', null, evidence.note));
+-    return sec;
+-  }
+-  function refsBlock(refs) {
+-    if (!refs || !refs.length) return null;
+-    var sec = el('div', 'cm-sec');
+-    sec.appendChild(el('b', null, '源码锚点'));
+-    refs.forEach(function (ref) {
+-      var line = el('span', 'cm-ref');
+-      line.appendChild(el('code', null, ref.path));
+-      if (ref.symbol) {
+-        line.appendChild(document.createTextNode(' -> '));
+-        line.appendChild(el('small', null, ref.symbol));
+-      }
+-      sec.appendChild(line);
+-    });
+-    return sec;
+-  }
+-  function rulesBlock(rules) {
+-    if (!rules || !rules.length) return null;
+-    var sec = el('div', 'cm-sec');
+-    sec.appendChild(el('b', null, '规则'));
+-    var row = el('div', 'cm-chips');
+-    rules.forEach(function (rule) { row.appendChild(chipEl(String(rule), 'warn')); });
+-    sec.appendChild(row);
+-    return sec;
+-  }
+-  function graphLine() {
+-    var row = el('div', 'cm-chips');
+-    if (graph.status) row.appendChild(chipEl('图状态 ' + graph.status, STATUS_TONE[graph.status] || null));
+-    if (graph.verified_at) row.appendChild(chipEl('校验于 ' + graph.verified_at, 'mute'));
+-    if (graph.verified_commit) row.appendChild(chipEl(String(graph.verified_commit).slice(0, 7), 'mute'));
+-    return row;
+-  }
+-  function head(text) {
+-    var h = el('div', 'cm-head');
+-    h.appendChild(el('span', 'cm-eyebrow', text));
+-    return h;
+-  }
+-
+-  function renderNode(id, fact) {
+-    panel.textContent = '';
+-    panel.appendChild(head('CODEMAP · 节点事实'));
+-    if (fact.detail) panel.appendChild(el('p', 'cm-detail', fact.detail));
+-    var chips = el('div', 'cm-chips');
+-    if (fact.kind) chips.appendChild(chipEl(fact.kind));
+-    if (fact.level != null) chips.appendChild(chipEl('L' + fact.level));
+-    (fact.tags || []).forEach(function (t) { chips.appendChild(chipEl('#' + t)); });
+-    panel.appendChild(chips);
+-    [evidenceBlock(fact.evidence), refsBlock(fact.refs), rulesBlock(fact.rules)].forEach(function (b) { if (b) panel.appendChild(b); });
+-    panel.appendChild(graphLine());
+-    var subId = subGraphId(fact.sub);
+-    if (subId) {
+-      var sec = el('div', 'cm-sec');
+-      sec.appendChild(goButton('下钻 → ' + (titles[subId] || subId), subId));
+-      panel.appendChild(sec);
+-    }
+-    panel.hidden = false;
+-  }
+-  function renderEdge(id, fact) {
+-    panel.textContent = '';
+-    panel.appendChild(head('CODEMAP · 关系事实'));
+-    var cond = fact.condition;
+-    panel.appendChild(el('p', 'cm-cond', '条件：' + (!cond || cond === 'always' ? '无条件' : cond)));
+-    if (fact.detail) panel.appendChild(el('p', 'cm-detail', fact.detail));
+-    var chips = el('div', 'cm-chips');
+-    if (fact.kind) chips.appendChild(chipEl(fact.kind));
+-    panel.appendChild(chips);
+-    [evidenceBlock(fact.evidence), refsBlock(fact.refs), rulesBlock(fact.rules)].forEach(function (b) { if (b) panel.appendChild(b); });
+-    panel.appendChild(graphLine());
+-    panel.hidden = false;
+-  }
+-
+-  function pinnedEdgeId() {
+-    var pin = svg.getAttribute('data-relationship-pin-active');
+-    if (!pin) return null;
+-    var edges = svg.querySelectorAll('[data-edge-key]');
+-    for (var i = 0; i < edges.length; i += 1) {
+-      if (edges[i].getAttribute('data-edge-key') === pin) return edges[i].getAttribute('data-edge-id');
+-    }
+-    return null;
+-  }
+-  var scheduled = false;
+-  function sync() {
+-    scheduled = false;
+-    if (chip.hidden) { panel.hidden = true; return; }
+-    var edgeId = pinnedEdgeId();
+-    if (edgeId && facts.edges && facts.edges[edgeId]) { renderEdge(edgeId, facts.edges[edgeId]); return; }
+-    var focus = svg.getAttribute('data-focus-active');
+-    if (focus && focus.indexOf(' ') < 0 && facts.nodes && facts.nodes[focus]) { renderNode(focus, facts.nodes[focus]); return; }
+-    panel.hidden = true;
+-  }
+-  function schedule() {
+-    if (scheduled) return;
+-    scheduled = true;
+-    window.requestAnimationFrame(sync);
+-  }
+-  var observer = new MutationObserver(schedule);
+-  observer.observe(svg, { attributes: true, attributeFilter: ['data-relationship-pin-active', 'data-focus-active'] });
+-  observer.observe(chip, { attributes: true, attributeFilter: ['hidden'] });
+-  schedule();
+-
+-  // 上级图入口：放在图容器之前，嵌入模式隐藏（由外壳负责导航）
+-  if (graph.parent && graph.parent.graph) {
+-    var crumb = el('nav', 'cm-crumb');
+-    crumb.setAttribute('aria-label', 'Codemap 图层导航');
+-    crumb.appendChild(goButton('↑ 上级图：' + (titles[graph.parent.graph] || graph.parent.graph), graph.parent.graph, graph.parent.node));
+-    if (graph.title) crumb.appendChild(el('span', null, '当前：' + graph.title));
+-    container.parentNode.insertBefore(crumb, container);
+-  }
+-
+-  // 外壳协议：收到 focus 消息时聚焦对应节点，让 Passport 展示
+-  window.addEventListener('message', function (event) {
+-    var data = event.data;
+-    if (!data || data.source !== 'codemap' || data.type !== 'focus' || typeof data.node !== 'string') return;
+-    if (svg.getAttribute('data-focus-active') === data.node) return;
+-    var nodes = svg.querySelectorAll('[data-node-id]');
+-    for (var i = 0; i < nodes.length; i += 1) {
+-      if (nodes[i].getAttribute('data-node-id') === data.node) {
+-        nodes[i].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+-        return;
+-      }
+-    }
+-  });
+-})();
+-`;
+-
+-// 把事实块、样式和扩展脚本注入模板的 </body> 之前
+-export function injectCodemapFacts(template, factsText) {
+-  const facts = JSON.parse(factsText);
+-  if (facts?.schema !== 'codemap.facts/v1') {
+-    throw new Error(`Codemap facts sidecar has an unsupported schema: ${JSON.stringify(facts?.schema)}`);
+-  }
+-  const block = [
+-    `<script id="codemap-facts-data" type="application/json">${serializeFacts(facts)}</script>`,
+-    `<style id="codemap-facts-style">${STYLE}</style>`,
+-    `<script id="codemap-facts-extension">${SCRIPT}</script>`,
+-  ].join('\n');
+-  const index = template.lastIndexOf('</body>');
+-  if (index < 0) throw new Error('Codemap facts injection: template has no </body>');
+-  return `${template.slice(0, index)}${block}\n${template.slice(index)}`;
+-}
+-
+-export function loadCodemapFacts(inputPath) {
+-  const factsPath = codemapFactsPath(inputPath);
+-  try {
+-    return fs.readFileSync(factsPath, 'utf8');
+-  } catch (error) {
+-    if (error.code === 'ENOENT') return null;
+-    throw error;
+-  }
+-}
+-// Codemap 事实侧车：把 <name>.facts.json 内嵌进页面，并追加只读的 Passport 扩展。
+-// 无侧车时不做任何事，输出与原版一致。
+-import fs from 'node:fs';
+-import path from 'node:path';
++import { CODEMAP_INTERACTION_SCRIPT, CODEMAP_INTERACTION_STYLE } from './codemap-interactions.mjs';
+
+ const FACTS_SUFFIX = '.facts.json';
+
+@@ -337,6 +75,10 @@
+   if (!chip || !summary || !svg) return;
+
+   var graph = facts.graph || {};
++  if (facts.id_map && window.Archify) Archify.codemapIds = facts.id_map;
++  function renderId(id) { return facts.id_map && facts.id_map.canonical_to_render ? facts.id_map.canonical_to_render[id] || id : id; }
++  var parentOrigin = location.origin;
++  try { if (document.referrer) parentOrigin = new URL(document.referrer).origin; } catch (_) {}
+   var titles = facts.titles || {};
+   var graphs = facts.graphs || {};
+   var SVG_NS = 'http://www.w3.org/2000/svg';
+@@ -368,7 +110,7 @@
+   }
+   function navigate(graphId, nodeId) {
+     if (window.parent && window.parent !== window) {
+-      window.parent.postMessage({ source: 'codemap', type: 'open', graph: graphId, node: nodeId || null }, '*');
++      window.parent.postMessage({ source: 'codemap', type: 'open', graph: graphId, node: nodeId || null }, parentOrigin === 'null' ? '*' : parentOrigin);
+       return;
+     }
+     location.href = graphId + '.html' + (nodeId ? '#focus=' + encodeURIComponent(nodeId) : '');
+@@ -467,12 +209,20 @@
+     var sec = el('div', 'cm-sec');
+     sec.appendChild(el('b', null, '规则'));
+     var row = el('div', 'cm-chips');
+-    rules.forEach(function (rule) { row.appendChild(chipEl(String(rule), 'warn')); });
++    rules.forEach(function (rule) {
++      if (typeof rule === 'string') row.appendChild(chipEl(rule + ' · 未结构化', 'warn'));
++      else if (rule && typeof rule === 'object') {
++        var definition = (facts.rule_definitions || []).find(function (item) { return item.id === rule.id && item.version === rule.version; });
++        row.appendChild(chipEl((definition && (definition.label || definition.title) || rule.id) + ' @' + rule.version, null));
++        if (definition && (definition.description || definition.detail)) sec.appendChild(el('div', null, definition.description || definition.detail));
++      }
++    });
+     sec.appendChild(row);
+     return sec;
+   }
+   function graphLine() {
+     var row = el('div', 'cm-chips');
++    if (graph.mode === 'design') row.appendChild(chipEl('设计草稿 · 修订 ' + graph.revision + ' · 未核验实现', 'warn'));
+     if (graph.status) row.appendChild(chipEl('图状态 ' + graph.status, STATUS_TONE[graph.status] || null));
+     if (graph.verified_at) row.appendChild(chipEl('校验于 ' + graph.verified_at, 'mute'));
+     if (graph.verified_commit) row.appendChild(chipEl(String(graph.verified_commit).slice(0, 7), 'mute'));
+@@ -484,9 +234,29 @@
+     return h;
+   }
+
++  function designBlock(design, action) {
++    if (!design) return null;
++    var sec = el('div', 'cm-sec');
++    sec.appendChild(el('b', null, '需求对象：' + design.id));
++    var labels = { responsibility: '责任', inputs: '输入', outputs: '输出', failure_impact: '失败影响', permission: '权限', interface: '接口', condition: '条件' };
++    Object.keys(labels).forEach(function (key) { if (design[key]) sec.appendChild(el('div', null, labels[key] + '：' + (Array.isArray(design[key]) ? design[key].join('、') : design[key]))); });
++    var interactions = { trigger: '触发', confirmation: '确认', submitting: '提交中', duplicate_guard: '防重复', error: '错误', success: '成功', refresh: '刷新' };
++    if (design.interaction) Object.keys(interactions).forEach(function (key) { if (design.interaction[key]) sec.appendChild(el('div', null, interactions[key] + '：' + (Array.isArray(design.interaction[key]) ? design.interaction[key].join('、') : design.interaction[key]))); });
++    if (action) sec.appendChild(el('div', null, '业务动作：' + action.label + '（' + action.id + '）'));
++    var scenario = facts.design && facts.design.scenario;
++    if (scenario) {
++      var steps = (scenario.steps || []).filter(function (step) { return step.object_id === design.id || step.relation_id === design.id; });
++      if (steps.length) sec.appendChild(el('div', null, '场景「' + scenario.label + '」：' + steps.map(function (step) { return step.label; }).join(' → ')));
++    }
++    return sec;
++  }
 +
-+const FACTS_SUFFIX = '.facts.json';
-+
-+// 候选 <name>.candidate.json 或 <name>.json 对应的侧车路径
-+export function codemapFactsPath(inputPath) {
-+  const dir = path.dirname(inputPath);
-+  const base = path.basename(inputPath).replace(/\.candidate\.json$/, '').replace(/\.json$/, '');
-+  return path.join(dir, `${base}${FACTS_SUFFIX}`);
-+}
-+
-+// 内嵌 JSON 时转义 < > & 与 {{，避免提前结束脚本块或命中模板占位符
-+function serializeFacts(value) {
-+  return JSON.stringify(value)
-+    .replace(/</g, '\\u003c')
-+    .replace(/>/g, '\\u003e')
-+    .replace(/&/g, '\\u0026')
-+    .replace(/\u2028/g, '\\u2028')
-+    .replace(/\u2029/g, '\\u2029')
-+    .replace(/\{\{/g, '{\\u007b');
-+}
-+
-+const STYLE = `
-+    .cm-panel { margin-top: 0.52rem; padding: 0.5rem; max-height: 15rem; overflow: auto; border: 1px solid color-mix(in srgb, var(--cloud-stroke) 38%, var(--toolbar-border)); border-radius: 0.55rem; background: color-mix(in srgb, var(--cloud-fill) 14%, var(--panel)); font-size: 0.625rem; line-height: 1.5; color: var(--text-muted); }
-+    .cm-panel[hidden] { display: none; }
-+    html[data-preset="blueprint"] .cm-panel { border-radius: 0.18rem; }
-+    .cm-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.3rem; }
-+    .cm-eyebrow { color: var(--cloud-stroke); font-size: 0.5rem; font-weight: 800; letter-spacing: 0.08em; }
-+    .cm-detail { margin: 0 0 0.35rem; color: var(--text); white-space: pre-wrap; word-break: break-word; }
-+    .cm-chips { display: flex; flex-wrap: wrap; gap: 0.24rem; margin-bottom: 0.35rem; }
-+    .cm-chip { padding: 0.12rem 0.34rem; border: 1px solid color-mix(in srgb, var(--toolbar-border) 82%, transparent); border-radius: 999px; background: color-mix(in srgb, var(--panel) 68%, transparent); color: var(--text-faint); font-size: 0.5rem; letter-spacing: 0.04em; }
-+    .cm-chip[data-tone="ok"] { border-color: color-mix(in srgb, var(--backend-stroke) 55%, var(--toolbar-border)); color: var(--backend-stroke); }
-+    .cm-chip[data-tone="warn"] { border-color: color-mix(in srgb, var(--security-stroke, #f59e0b) 60%, var(--toolbar-border)); color: var(--security-stroke, #f59e0b); }
-+    .cm-chip[data-tone="bad"] { border-color: #ef4444; color: #ef4444; }
-+    .cm-chip[data-tone="mute"] { opacity: 0.7; }
-+    .cm-sec { margin-top: 0.35rem; }
-+    .cm-sec > b { display: block; color: var(--text-faint); font-size: 0.5rem; font-weight: 800; letter-spacing: 0.08em; }
-+    .cm-ref { display: block; margin-top: 0.12rem; word-break: break-all; }
-+    .cm-ref code { color: var(--text); font-size: inherit; }
-+    .cm-ref small { color: var(--cloud-stroke); font-size: inherit; }
-+    .cm-cond { margin: 0 0 0.35rem; color: var(--text); font-weight: 700; }
-+    .cm-go { appearance: none; padding: 0.2rem 0.55rem; border: 1px solid color-mix(in srgb, var(--cloud-stroke) 55%, var(--toolbar-border)); border-radius: 999px; background: transparent; color: var(--cloud-stroke); font: inherit; font-size: 0.55rem; font-weight: 700; cursor: pointer; }
-+    .cm-go:hover, .cm-go:focus-visible { background: color-mix(in srgb, var(--cloud-stroke) 16%, transparent); outline: 2px solid var(--cloud-stroke); outline-offset: 1px; }
-+    .cm-crumb { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin: 0 0 0.5rem; font-size: 0.6rem; color: var(--text-muted); }
-+    html[data-embed="true"] .cm-crumb { display: none; }
+   function renderNode(id, fact) {
+     panel.textContent = '';
+-    panel.appendChild(head('CODEMAP · 节点事实'));
++    panel.appendChild(head(graph.mode === 'design' ? 'CODEMAP · 需求对象' : 'CODEMAP · 节点事实'));
++    var design = designBlock(fact.design);
++    if (design) panel.appendChild(design);
++    if (fact.original_id) document.getElementById('focus-id').textContent = fact.original_id;
+     if (fact.detail) panel.appendChild(el('p', 'cm-detail', fact.detail));
+     var metaChips = el('div', 'cm-chips');
+     if (fact.kind) metaChips.appendChild(chipEl(fact.kind));
+@@ -515,7 +285,10 @@
+   }
+   function renderEdge(id, fact) {
+     panel.textContent = '';
+-    panel.appendChild(head('CODEMAP · 关系事实'));
++    panel.appendChild(head(graph.mode === 'design' ? 'CODEMAP · 需求关系' : 'CODEMAP · 关系事实'));
++    var design = designBlock(fact.design, fact.action);
++    if (design) panel.appendChild(design);
++    if (fact.original_id) document.getElementById('focus-id').textContent = fact.original_id;
+     var cond = fact.condition;
+     panel.appendChild(el('p', 'cm-cond', '条件：' + (!cond || cond === 'always' ? '无条件' : cond)));
+     if (fact.detail) panel.appendChild(el('p', 'cm-detail', fact.detail));
+@@ -585,17 +358,30 @@
+
+   // 外壳协议：收到 focus 消息时聚焦对应节点，让 Passport 展示
+   window.addEventListener('message', function (event) {
++    if (window.parent === window || event.source !== window.parent || event.origin !== parentOrigin) return;
+     var data = event.data;
+     if (!data || data.source !== 'codemap' || data.type !== 'focus' || typeof data.node !== 'string') return;
+-    if (svg.getAttribute('data-focus-active') === data.node) return;
++    var target = renderId(data.node);
++    if (svg.getAttribute('data-focus-active') === target) return;
+     var nodes = svg.querySelectorAll('[data-node-id]');
+     for (var i = 0; i < nodes.length; i += 1) {
+-      if (nodes[i].getAttribute('data-node-id') === data.node) {
++      if (nodes[i].getAttribute('data-node-id') === target) {
+         nodes[i].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+         return;
+       }
+     }
+   });
++  function focusCanonicalLink() {
++    if (!facts.id_map || !window.Archify || !Archify.focus) return;
++    var query = new URLSearchParams(location.hash.slice(1));
++    var node = query.get('focus');
++    var edge = query.get('relation');
++    if (node) Archify.focus.set(renderId(node), { updateUrl: false, toggle: false });
++    else if (edge) Archify.focus.inspectRelationshipById(renderId(edge), { updateUrl: false, toggle: false });
++  }
++  window.addEventListener('hashchange', focusCanonicalLink);
++  focusCanonicalLink();
++  if (facts.id_map) window.dispatchEvent(new Event('hashchange'));
+ })();
+ `;
+
+@@ -609,6 +395,8 @@
+     `<script id="codemap-facts-data" type="application/json">${serializeFacts(facts)}</script>`,
+     `<style id="codemap-facts-style">${STYLE}</style>`,
+     `<script id="codemap-facts-extension">${SCRIPT}</script>`,
++    `<style id="codemap-interaction-style">${CODEMAP_INTERACTION_STYLE}</style>`,
++    `<script id="codemap-interaction-extension">${CODEMAP_INTERACTION_SCRIPT}</script>`,
+   ].join('\n');
+   const index = template.lastIndexOf('</body>');
+   if (index < 0) throw new Error('Codemap facts injection: template has no </body>');
+--- a/assets/template.html
++++ b/assets/template.html
+@@ -5612,7 +5612,22 @@
+         .replace(/\b\w/g, function (letter) { return letter.toUpperCase(); });
+     }
+
++    // 渲染器内部 ID 可编码；对外链接始终使用需求的规范对象 ID。
++    function readerCanonicalId(id) {
++      return Archify.codemapIds && Archify.codemapIds.render_to_canonical[id] || id;
++    }
++    function readerRenderId(id) {
++      return Archify.codemapIds && Archify.codemapIds.canonical_to_render[id] || id;
++    }
++    function canonicalReaderState(state) {
++      if (!Archify.codemapIds) return state;
++      var params = new URLSearchParams(state);
++      ['focus', 'relation'].forEach(function (key) { if (params.has(key)) params.set(key, readerCanonicalId(params.get(key))); });
++      if (params.has('route')) params.set('route', params.get('route').split('~').map(readerCanonicalId).join('~'));
++      return params.toString();
++    }
+     function readerLink(state) {
++      state = canonicalReaderState(state);
+       var template = document.documentElement.getAttribute('data-reading-link-template');
+       if (template === null) return location.href.replace(/#.*$/, '') + '#' + state;
+       if (!template || template.length > 4096 || template.split('{state}').length !== 2) return null;
+@@ -8483,7 +8498,7 @@
+         }
+         if (options.updateUrl === true && activeIds.length === 1) {
+           try {
+-            history.replaceState(null, '', location.pathname + location.search + '#focus=' + encodeURIComponent(activeIds[0]));
++            history.replaceState(null, '', location.pathname + location.search + '#focus=' + encodeURIComponent(readerCanonicalId(activeIds[0])));
+           } catch (_) {}
+         }
+       }
+@@ -8560,7 +8575,7 @@
+         if (options.updateUrl !== false) {
+           try {
+             history.replaceState(null, '', location.pathname + location.search + '#focus=' +
+-              encodeURIComponent(activeIds[0]) + '&reach=' + direction);
++              encodeURIComponent(readerCanonicalId(activeIds[0])) + '&reach=' + direction);
+           } catch (_) {}
+         }
+         if (options.reveal !== false && Archify.view && typeof Archify.view.reveal === 'function') {
+@@ -9147,7 +9162,7 @@
+         });
+         revealPinnedRelationship(record);
+         if (options.updateUrl !== false && record.id) {
+-          try { history.replaceState(null, '', location.pathname + location.search + '#relation=' + encodeURIComponent(record.id)); } catch (_) {}
++          try { history.replaceState(null, '', location.pathname + location.search + '#relation=' + encodeURIComponent(readerCanonicalId(record.id))); } catch (_) {}
+         }
+         return true;
+       }
+@@ -9715,7 +9730,7 @@
+         if (options.updateUrl !== false) {
+           var key = options.urlKey || 'focus';
+           var value = options.urlValue || normalized[0];
+-          try { history.replaceState(null, '', location.pathname + location.search + '#' + key + '=' + encodeURIComponent(value)); } catch (_) {}
++          try { history.replaceState(null, '', location.pathname + location.search + '#' + key + '=' + encodeURIComponent(readerCanonicalId(value))); } catch (_) {}
+         }
+         return true;
+       }
+@@ -9896,8 +9911,8 @@
+       function syncFocusFromHash() {
+         try {
+           var params = new URLSearchParams(location.hash.replace(/^#/, ''));
+-          var relation = params.get('relation');
+-          var initial = params.get('focus');
++          var relation = readerRenderId(params.get('relation'));
++          var initial = readerRenderId(params.get('focus'));
+           var reach = params.get('reach');
+           if (relation) {
+             if (html.getAttribute('data-embed') === 'true' ||
+@@ -11099,6 +11114,8 @@
+       var state = { scale: 1, x: 0, y: 0, mode: 'overview' };
+       var minimumZoom = 0.25;
+       var maximumZoom = 3;
++      var codemapMode = false;
++      var spacePan = false;
+       var drag = null;
+       var cameraTimer = null;
+       var cameraFrame = null;
+@@ -11114,6 +11131,8 @@
+       var viewBox = svg.viewBox && svg.viewBox.baseVal;
+
+       function clamp() {
++        // Codemap 的指针锚点和平移属于视口，不用整图居中覆盖用户位置。
++        if (codemapMode) return;
+         var width = svg.clientWidth || 1;
+         var height = svg.clientHeight || 1;
+         if (state.scale < 1) {
+@@ -11239,6 +11258,7 @@
+       // outer page-flow box for long ordinary diagrams, never the SVG itself:
+       // changing its height would feed the smaller size back into camera math.
+       function ordinaryPage() {
++        if (codemapMode) return false;
+         var html = document.documentElement;
+         return html.getAttribute('data-embed') !== 'true' &&
+           html.getAttribute('data-present') !== 'true' &&
+@@ -11286,7 +11306,7 @@
+         renderControls();
+         outBtn.disabled = state.scale <= minimumZoom;
+         inBtn.disabled = state.scale >= maximumZoom;
+-        container.classList.toggle('is-pannable', state.scale > 1);
++        container.classList.toggle('is-pannable', codemapMode || state.scale > 1);
+         if (Archify.radar && typeof Archify.radar.sync === 'function') Archify.radar.sync();
+         if (Archify.viewerChromeLayout && typeof Archify.viewerChromeLayout.schedule === 'function') {
+           Archify.viewerChromeLayout.schedule();
+@@ -11382,7 +11402,7 @@
+         var previous = state.scale;
+         next = Math.max(minimumZoom, Math.min(maximumZoom, Math.round(next * 4) / 4));
+         if (next === previous) return;
+-        var longDiagram = svg.clientHeight > window.innerHeight && Math.min(previous, next) < 1;
++        var longDiagram = !codemapMode && svg.clientHeight > window.innerHeight && Math.min(previous, next) < 1;
+         var before = longDiagram ? svg.getBoundingClientRect() : null;
+         var anchorY = before ? Math.max(0, Math.min(window.innerHeight, before.bottom) + Math.max(0, before.top)) / 2 : 0;
+         if (before && (before.bottom <= 0 || before.top >= window.innerHeight)) anchorY = window.innerHeight / 2;
+@@ -11402,6 +11422,22 @@
+             : documentTop + state.y + logicalY * next - anchorY;
+           window.scrollTo({ left: window.scrollX, top: Math.max(0, pageY), behavior: 'instant' });
+         }
++      }
++      function zoomAt(next, clientX, clientY) {
++        // 从当前绘制位置计算锚点；连续滚轮不复用按钮的四分之一档位。
++        interruptCamera('wheel');
++        var previous = state.scale;
++        next = Math.max(minimumZoom, Math.min(maximumZoom, Number(next)));
++        if (!Number.isFinite(next) || next === previous) return;
++        var rect = svg.getBoundingClientRect();
++        var baseX = rect.left - state.x;
++        var baseY = rect.top - state.y;
++        var logicalX = (clientX - rect.left) / previous;
++        var logicalY = (clientY - rect.top) / previous;
++        state.scale = next;
++        state.x = clientX - baseX - logicalX * next;
++        state.y = clientY - baseY - logicalY * next;
++        apply();
+       }
+       function reset(options) {
+         options = options || {};
+@@ -11645,12 +11681,21 @@
+       outBtn.addEventListener('click', function () { zoom(state.scale - 0.25); });
+       resetBtn.addEventListener('click', reset);
+       container.addEventListener('pointerdown', function (event) {
+-        if (state.scale <= 1 || event.button !== 0 || event.target.closest('.diagram-nav, .focus-chip, .node-finder, .diagram-guide, .overview-map, .route-probe, .semantic-lens') || event.target.closest('[data-node-id]') || event.target.closest('[data-relationship-hit-key]')) return;
++        if ((!codemapMode && state.scale <= 1) || event.button !== 0 || event.target.closest('button, input, textarea, select, [contenteditable], [role="dialog"], [role="menu"], .diagram-nav, .focus-chip, .node-finder, .diagram-guide, .overview-map, .route-probe, .semantic-lens, .cm-panel')) return;
++        if ((!codemapMode || !spacePan) && event.target.closest('[data-node-id], [data-relationship-hit-key], [data-edge-id]')) return;
++        if (codemapMode && spacePan) { event.preventDefault(); event.stopPropagation(); }
+         interruptCamera();
+         drag = { startX: event.clientX, startY: event.clientY, x: state.x, y: state.y, moved: false };
+         container.classList.add('is-panning');
+         try { container.setPointerCapture(event.pointerId); } catch (_) {}
+-      });
++      }, true);
++      document.addEventListener('keydown', function (event) {
++        if (!codemapMode || event.code !== 'Space' || event.target.closest('button, a, input, textarea, select, [contenteditable], [role="menu"], [role="dialog"]')) return;
++        spacePan = true;
++        if (container.contains(event.target)) { event.preventDefault(); event.stopPropagation(); }
++      }, true);
++      document.addEventListener('keyup', function (event) { if (event.code === 'Space') spacePan = false; });
++      window.addEventListener('blur', function () { spacePan = false; drag = null; container.classList.remove('is-panning'); });
+       container.addEventListener('pointermove', function (event) {
+         if (!drag) return;
+         var dx = event.clientX - drag.startX;
+@@ -11693,6 +11738,8 @@
+       return {
+         zoomIn: function () { zoom(state.scale + 0.25); },
+         zoomOut: function () { zoom(state.scale - 0.25); },
++        zoomAt: zoomAt,
++        enableCodemap: function () { codemapMode = true; apply(); },
+         reset: reset,
+         reveal: reveal,
+         centerAt: centerAt,
+@@ -12997,7 +13044,7 @@
+       }
+       function replaceRouteHash(value) {
+         try {
+-          history.replaceState(null, '', location.pathname + location.search + (value ? '#route=' + value : ''));
++          history.replaceState(null, '', location.pathname + location.search + (value ? '#' + canonicalReaderState('route=' + value) : ''));
+         } catch (_) {}
+       }
+       function renderPlaceholder(copy) {
+@@ -13728,7 +13775,7 @@
+             if (mode !== 'idle') clear({ updateUrl: false, restoreFocus: false });
+             return;
+           }
+-          var parts = route.split('~');
++          var parts = route.split('~').map(readerRenderId);
+           if (parts.length !== 2) return;
+           var byId = nodesById();
+           if (!byId[parts[0]] || !byId[parts[1]]) return;
+--- a/renderers/shared/codemap-interactions.mjs
++++ b/renderers/shared/codemap-interactions.mjs
+@@ -0,0 +1,207 @@
++// Codemap 画布只派发固定动作；业务写入由宿主的认证入口处理。
++export const CODEMAP_INTERACTION_STYLE = `
++  .diagram-container[data-codemap-canvas] { overscroll-behavior: contain; }
++  .diagram-container[data-codemap-canvas] > svg { transition: none; }
++  .cm-context-menu { position: fixed; z-index: 10000; min-width: 190px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow: auto; padding: 5px; border: 1px solid var(--toolbar-border); border-radius: 9px; background: var(--panel); color: var(--text); box-shadow: 0 12px 36px #0005; }
++  .cm-context-menu[hidden] { display: none; }
++  .cm-context-menu button { display: flex; gap: 9px; align-items: center; width: 100%; border: 0; border-radius: 5px; padding: 9px 12px; background: transparent; color: inherit; text-align: left; cursor: pointer; font: inherit; font-size: 12px; }
++  .cm-context-menu button:hover, .cm-context-menu button:focus-visible { background: color-mix(in srgb, var(--cloud-stroke) 15%, var(--panel)); outline: 1px solid var(--cloud-stroke); }
++  .cm-context-menu button[data-group-start] { margin-top: 4px; border-top: 1px solid var(--toolbar-border); border-radius: 0; }
++  .cm-action-feedback { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 10001; max-width: calc(100vw - 24px); padding: 7px 12px; border-radius: 6px; background: var(--panel); color: var(--text); font-size: 12px; }
++  .cm-action-feedback:empty { display: none; }
 +`;
 +
-+const SCRIPT = `
++export const CODEMAP_INTERACTION_SCRIPT = `
 +(function () {
 +  'use strict';
-+  var dataEl = document.getElementById('codemap-facts-data');
-+  if (!dataEl) return;
-+  var facts;
-+  try { facts = JSON.parse(dataEl.textContent); } catch (_) { return; }
-+  var chip = document.getElementById('focus-chip');
-+  var summary = document.getElementById('focus-summary');
++  var data = document.getElementById('codemap-facts-data');
 +  var container = document.querySelector('.diagram-container');
-+  var svg = container && container.querySelector('svg');
-+  if (!chip || !summary || !svg) return;
-+
++  var svg = container && container.querySelector(':scope > svg');
++  if (!data || !svg || !window.Archify || !Archify.view) return;
++  var facts;
++  try { facts = JSON.parse(data.textContent); } catch (_) { return; }
 +  var graph = facts.graph || {};
-+  var titles = facts.titles || {};
-+  var panel = document.createElement('div');
-+  panel.id = 'codemap-facts-panel';
-+  panel.className = 'cm-panel';
-+  panel.setAttribute('role', 'region');
-+  panel.setAttribute('aria-label', 'Codemap 业务事实');
-+  panel.hidden = true;
-+  summary.parentNode.insertBefore(panel, summary);
-+
-+  var EVIDENCE_TONE = { 'runtime-verified': 'ok', 'source-verified': 'ok', 'human-confirmed': 'ok', 'inferred': 'warn', 'unverified': 'warn', 'conflict': 'bad' };
-+  var STATUS_TONE = { current: 'ok', 'needs-review': 'warn', stale: 'warn', conflict: 'bad' };
-+
-+  function el(tag, cls, text) {
-+    var node = document.createElement(tag);
-+    if (cls) node.className = cls;
-+    if (text != null) node.textContent = text;
-+    return node;
++  function canonical(id) { return id && facts.id_map && facts.id_map.render_to_canonical ? facts.id_map.render_to_canonical[id] || id : id; }
++  var parentOrigin = location.origin;
++  try { if (document.referrer) parentOrigin = new URL(document.referrer).origin; } catch (_) {}
++  var capabilities = [];
++  var hostContext = {};
++  var activeTarget = { kind: 'canvas' };
++  var restoreFocus = null;
++  var menu = document.createElement('div');
++  menu.className = 'cm-context-menu';
++  menu.setAttribute('role', 'menu');
++  menu.setAttribute('aria-label', '地图操作');
++  menu.hidden = true;
++  document.body.appendChild(menu);
++  var feedback = document.createElement('div');
++  feedback.className = 'cm-action-feedback';
++  feedback.setAttribute('role', 'status');
++  document.body.appendChild(feedback);
++  var feedbackTimer;
++  function notify(text) {
++    clearTimeout(feedbackTimer);
++    feedback.textContent = text;
++    feedbackTimer = setTimeout(function () { feedback.textContent = ''; }, 3500);
 +  }
-+  function chipEl(text, tone) {
-+    var c = el('span', 'cm-chip', text);
-+    if (tone) c.setAttribute('data-tone', tone);
-+    return c;
++  function post(message) {
++    if (window.parent === window) return;
++    window.parent.postMessage(Object.assign({ source: 'codemap' }, message), parentOrigin === 'null' ? '*' : parentOrigin);
 +  }
-+  function subGraphId(sub) {
-+    if (!sub || typeof sub !== 'string') return null;
-+    return sub.split('/').pop().replace(/\\.ya?ml$/, '');
++  function trusted(event) {
++    return window.parent !== window && event.source === window.parent && event.origin === parentOrigin;
 +  }
-+  function navigate(graphId, nodeId) {
-+    if (window.parent && window.parent !== window) {
-+      window.parent.postMessage({ source: 'codemap', type: 'open', graph: graphId, node: nodeId || null }, '*');
-+      return;
++  function targetFor(element) {
++    var node = element.closest('[data-node-id]');
++    if (node && facts.nodes[node.getAttribute('data-node-id')]) return { kind: 'node', node: node.getAttribute('data-node-id') };
++    var edge = element.closest('[data-edge-id]');
++    var hit = element.closest('[data-relationship-hit-key]');
++    if (!edge && hit) {
++      var key = hit.getAttribute('data-relationship-hit-key');
++      edge = Array.prototype.find.call(svg.querySelectorAll('[data-edge-key]'), function (item) { return item.getAttribute('data-edge-key') === key; });
 +    }
-+    location.href = graphId + '.html' + (nodeId ? '#focus=' + encodeURIComponent(nodeId) : '');
++    if (edge && facts.edges[edge.getAttribute('data-edge-id')]) return { kind: 'edge', edge: edge.getAttribute('data-edge-id') };
++    return { kind: 'canvas' };
 +  }
-+  function goButton(text, graphId, nodeId) {
-+    var b = el('button', 'cm-go', text);
-+    b.type = 'button';
-+    b.addEventListener('click', function () { navigate(graphId, nodeId); });
-+    return b;
++  function selectedTarget() {
++    var relation = Archify.focus.relationship();
++    if (relation && relation.id && facts.edges[relation.id]) return { kind: 'edge', edge: relation.id };
++    var selected = Archify.focus.active();
++    if (typeof selected === 'string' && facts.nodes[selected]) return { kind: 'node', node: selected };
++    return { kind: 'canvas' };
 +  }
-+  function evidenceBlock(evidence) {
-+    if (!evidence || !evidence.level) return null;
-+    var sec = el('div', 'cm-sec');
-+    sec.appendChild(el('b', null, '证据'));
-+    var row = el('div', 'cm-chips');
-+    row.appendChild(chipEl(evidence.level, EVIDENCE_TONE[evidence.level] || null));
-+    sec.appendChild(row);
-+    if (evidence.note) sec.appendChild(el('div', null, evidence.note));
-+    return sec;
++  function detail(target) {
++    if (target.node) Archify.focus.set(target.node, { toggle: false });
++    else if (target.edge) Archify.focus.inspectRelationshipById(target.edge, { toggle: false });
 +  }
-+  function refsBlock(refs) {
-+    if (!refs || !refs.length) return null;
-+    var sec = el('div', 'cm-sec');
-+    sec.appendChild(el('b', null, '源码锚点'));
-+    refs.forEach(function (ref) {
-+      var line = el('span', 'cm-ref');
-+      line.appendChild(el('code', null, ref.path));
-+      if (ref.symbol) {
-+        line.appendChild(document.createTextNode(' -> '));
-+        line.appendChild(el('small', null, ref.symbol));
-+      }
-+      sec.appendChild(line);
++  function close(restore) {
++    menu.hidden = true;
++    if (restore && restoreFocus && document.contains(restoreFocus)) restoreFocus.focus();
++  }
++  // 主界面、键盘和右键菜单复用此动作表；新增动作必须明确能力与处理入口。
++  var actions = [
++    { id: 'details', label: '查看详情与条件', icon: 'i', group: 'object', visible: function (t) { return t.kind !== 'canvas'; }, run: detail },
++    { id: 'focus', label: '聚焦对象', icon: '◎', group: 'object', visible: function (t) { return t.kind !== 'canvas'; }, run: function (t) {
++      detail(t);
++      if (t.node) Archify.view.reveal([t.node], { instant: true });
++      else { var edge = Archify.focus.relationship(); if (edge) Archify.view.reveal([edge.from, edge.to], { instant: true }); }
++    } },
++    { id: 'open', label: '下钻子流程', icon: '↳', group: 'object', visible: function (t) { return t.node && facts.nodes[t.node].sub; }, run: function (t) {
++      var id = String(facts.nodes[t.node].sub).split('/').pop().replace(/\\.ya?ml$/, '');
++      if (!/^[a-z0-9-]+$/.test(id)) return;
++      if (window.parent !== window) post({ type: 'open', graph: id });
++      else location.href = id + '.html';
++    } },
++    { id: 'copy-link', label: '复制对象链接', icon: '↗', group: 'object', visible: function (t) { return t.kind !== 'canvas'; }, run: function (t) {
++      var url = new URL(location.href);
++      url.hash = t.node ? 'focus=' + encodeURIComponent(canonical(t.node)) : 'relation=' + encodeURIComponent(canonical(t.edge));
++      if (!navigator.clipboard) { notify('当前浏览器不支持复制，请从地址栏复制链接'); return; }
++      navigator.clipboard.writeText(url.href).then(function () { notify('对象链接已复制'); }, function () { notify('复制失败，请检查浏览器剪贴板权限'); });
++    } },
++    { id: 'zoom-in', label: '放大', icon: '+', group: 'view', run: function () { Archify.view.zoomIn(); } },
++    { id: 'zoom-out', label: '缩小', icon: '−', group: 'view', run: function () { Archify.view.zoomOut(); } },
++    { id: 'fit', label: '适应当前范围', icon: '⌖', group: 'view', run: function () {
++      var selected = Archify.focus.active();
++      if (selected) Archify.view.reveal(Array.isArray(selected) ? selected : [selected], { instant: true });
++      else Archify.view.reset();
++    } },
++    { id: 'reset', label: '重置视图', icon: '↺', group: 'view', run: function () { Archify.view.reset(); } },
++    { id: 'create-requirement', label: '发起需求变更', icon: '＋', group: 'work', visible: function () { return capabilities.indexOf('create-requirement') >= 0; }, run: function (t) {
++      post({ type: 'action', action: 'create-requirement', graph: graph.id, node: canonical(t.node), edge: canonical(t.edge), context: hostContext });
++    } }
++  ];
++  function run(id, target) {
++    var action = actions.find(function (item) { return item.id === id; });
++    if (!action || (action.visible && !action.visible(target))) return;
++    close(false);
++    action.run(target);
++  }
++  function show(target, x, y, source) {
++    activeTarget = target;
++    restoreFocus = source || document.activeElement;
++    menu.textContent = '';
++    var previousGroup = '';
++    actions.filter(function (item) { return !item.visible || item.visible(target); }).forEach(function (action) {
++      var button = document.createElement('button');
++      button.type = 'button';
++      button.setAttribute('role', 'menuitem');
++      button.setAttribute('data-action', action.id);
++      if (previousGroup && previousGroup !== action.group) button.setAttribute('data-group-start', '');
++      previousGroup = action.group;
++      var icon = document.createElement('span');
++      icon.setAttribute('aria-hidden', 'true');
++      icon.textContent = action.icon;
++      button.appendChild(icon);
++      button.appendChild(document.createTextNode(action.label));
++      button.addEventListener('click', function () { run(action.id, activeTarget); });
++      menu.appendChild(button);
 +    });
-+    return sec;
++    menu.hidden = false;
++    menu.style.left = Math.max(8, Math.min(x, window.innerWidth - menu.offsetWidth - 8)) + 'px';
++    menu.style.top = Math.max(8, Math.min(y, window.innerHeight - menu.offsetHeight - 8)) + 'px';
++    menu.querySelector('button').focus();
 +  }
-+  function rulesBlock(rules) {
-+    if (!rules || !rules.length) return null;
-+    var sec = el('div', 'cm-sec');
-+    sec.appendChild(el('b', null, '规则'));
-+    var row = el('div', 'cm-chips');
-+    rules.forEach(function (rule) { row.appendChild(chipEl(String(rule), 'warn')); });
-+    sec.appendChild(row);
-+    return sec;
++  var excluded = 'input, textarea, select, [contenteditable], [role="dialog"], [role="menu"], .focus-chip, .node-finder, .diagram-guide, .overview-map, .route-probe, .semantic-lens, .cm-panel, .diagram-nav';
++  container.setAttribute('data-codemap-canvas', 'true');
++  container.setAttribute('tabindex', '0');
++  Archify.view.enableCodemap();
++  container.addEventListener('wheel', function (event) {
++    if (event.ctrlKey || event.metaKey || event.target.closest(excluded)) return;
++    event.preventDefault();
++    event.stopPropagation();
++    close(false);
++    var delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? container.clientHeight : 1);
++    delta = Math.max(-100, Math.min(100, delta));
++    Archify.view.zoomAt(Archify.view.state().scale * Math.exp(-delta * 0.002), event.clientX, event.clientY);
++  }, { passive: false });
++  container.addEventListener('contextmenu', function (event) {
++    if (event.target.closest(excluded)) return;
++    event.preventDefault();
++    show(targetFor(event.target), event.clientX, event.clientY, event.target.closest('[tabindex]') || container);
++  });
++  var toolbar = container.querySelector('.diagram-nav');
++  if (toolbar) {
++    var more = document.createElement('button');
++    more.type = 'button';
++    more.textContent = '⋯';
++    more.setAttribute('aria-label', '更多地图操作');
++    more.title = '更多地图操作（Shift+F10）';
++    more.addEventListener('click', function () { var rect = more.getBoundingClientRect(); show(selectedTarget(), rect.left, rect.top - 10, more); });
++    toolbar.appendChild(more);
 +  }
-+  function graphLine() {
-+    var row = el('div', 'cm-chips');
-+    if (graph.status) row.appendChild(chipEl('图状态 ' + graph.status, STATUS_TONE[graph.status] || null));
-+    if (graph.verified_at) row.appendChild(chipEl('校验于 ' + graph.verified_at, 'mute'));
-+    if (graph.verified_commit) row.appendChild(chipEl(String(graph.verified_commit).slice(0, 7), 'mute'));
-+    return row;
-+  }
-+  function head(text) {
-+    var h = el('div', 'cm-head');
-+    h.appendChild(el('span', 'cm-eyebrow', text));
-+    return h;
-+  }
-+
-+  function renderNode(id, fact) {
-+    panel.textContent = '';
-+    panel.appendChild(head('CODEMAP · 节点事实'));
-+    if (fact.detail) panel.appendChild(el('p', 'cm-detail', fact.detail));
-+    var chips = el('div', 'cm-chips');
-+    if (fact.kind) chips.appendChild(chipEl(fact.kind));
-+    if (fact.level != null) chips.appendChild(chipEl('L' + fact.level));
-+    (fact.tags || []).forEach(function (t) { chips.appendChild(chipEl('#' + t)); });
-+    panel.appendChild(chips);
-+    [evidenceBlock(fact.evidence), refsBlock(fact.refs), rulesBlock(fact.rules)].forEach(function (b) { if (b) panel.appendChild(b); });
-+    panel.appendChild(graphLine());
-+    var subId = subGraphId(fact.sub);
-+    if (subId) {
-+      var sec = el('div', 'cm-sec');
-+      sec.appendChild(goButton('下钻 → ' + (titles[subId] || subId), subId));
-+      panel.appendChild(sec);
-+    }
-+    panel.hidden = false;
-+  }
-+  function renderEdge(id, fact) {
-+    panel.textContent = '';
-+    panel.appendChild(head('CODEMAP · 关系事实'));
-+    var cond = fact.condition;
-+    panel.appendChild(el('p', 'cm-cond', '条件：' + (!cond || cond === 'always' ? '无条件' : cond)));
-+    if (fact.detail) panel.appendChild(el('p', 'cm-detail', fact.detail));
-+    var chips = el('div', 'cm-chips');
-+    if (fact.kind) chips.appendChild(chipEl(fact.kind));
-+    panel.appendChild(chips);
-+    [evidenceBlock(fact.evidence), refsBlock(fact.refs), rulesBlock(fact.rules)].forEach(function (b) { if (b) panel.appendChild(b); });
-+    panel.appendChild(graphLine());
-+    panel.hidden = false;
-+  }
-+
-+  function pinnedEdgeId() {
-+    var pin = svg.getAttribute('data-relationship-pin-active');
-+    if (!pin) return null;
-+    var edges = svg.querySelectorAll('[data-edge-key]');
-+    for (var i = 0; i < edges.length; i += 1) {
-+      if (edges[i].getAttribute('data-edge-key') === pin) return edges[i].getAttribute('data-edge-id');
-+    }
-+    return null;
-+  }
-+  var scheduled = false;
-+  function sync() {
-+    scheduled = false;
-+    if (chip.hidden) { panel.hidden = true; return; }
-+    var edgeId = pinnedEdgeId();
-+    if (edgeId && facts.edges && facts.edges[edgeId]) { renderEdge(edgeId, facts.edges[edgeId]); return; }
-+    var focus = svg.getAttribute('data-focus-active');
-+    if (focus && focus.indexOf(' ') < 0 && facts.nodes && facts.nodes[focus]) { renderNode(focus, facts.nodes[focus]); return; }
-+    panel.hidden = true;
-+  }
-+  function schedule() {
-+    if (scheduled) return;
-+    scheduled = true;
-+    window.requestAnimationFrame(sync);
-+  }
-+  var observer = new MutationObserver(schedule);
-+  observer.observe(svg, { attributes: true, attributeFilter: ['data-relationship-pin-active', 'data-focus-active'] });
-+  observer.observe(chip, { attributes: true, attributeFilter: ['hidden'] });
-+  schedule();
-+
-+  // 上级图入口：放在图容器之前，嵌入模式隐藏（由外壳负责导航）
-+  if (graph.parent && graph.parent.graph) {
-+    var crumb = el('nav', 'cm-crumb');
-+    crumb.setAttribute('aria-label', 'Codemap 图层导航');
-+    crumb.appendChild(goButton('↑ 上级图：' + (titles[graph.parent.graph] || graph.parent.graph), graph.parent.graph, graph.parent.node));
-+    if (graph.title) crumb.appendChild(el('span', null, '当前：' + graph.title));
-+    container.parentNode.insertBefore(crumb, container);
-+  }
-+
-+  // 外壳协议：收到 focus 消息时聚焦对应节点，让 Passport 展示
-+  window.addEventListener('message', function (event) {
-+    var data = event.data;
-+    if (!data || data.source !== 'codemap' || data.type !== 'focus' || typeof data.node !== 'string') return;
-+    if (svg.getAttribute('data-focus-active') === data.node) return;
-+    var nodes = svg.querySelectorAll('[data-node-id]');
-+    for (var i = 0; i < nodes.length; i += 1) {
-+      if (nodes[i].getAttribute('data-node-id') === data.node) {
-+        nodes[i].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-+        return;
-+      }
++  container.addEventListener('keydown', function (event) {
++    if ((event.shiftKey && event.key === 'F10') || event.key === 'ContextMenu') {
++      if (event.target.closest('input, textarea, select, [contenteditable]')) return;
++      event.preventDefault();
++      var rect = event.target.getBoundingClientRect();
++      var target = targetFor(event.target);
++      show(target.kind === 'canvas' ? selectedTarget() : target, rect.left + 20, rect.top + 20, event.target);
 +    }
 +  });
++  menu.addEventListener('keydown', function (event) {
++    if (event.key === 'Escape' || event.key === 'Tab') { if (event.key === 'Escape') event.preventDefault(); close(true); return; }
++    var buttons = Array.from(menu.querySelectorAll('button'));
++    var index = buttons.indexOf(document.activeElement);
++    if (['ArrowDown', 'ArrowUp', 'Home', 'End'].indexOf(event.key) < 0) return;
++    event.preventDefault();
++    var next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length;
++    buttons[next].focus();
++  });
++  document.addEventListener('pointerdown', function (event) { if (!menu.contains(event.target)) close(false); });
++  window.addEventListener('blur', function () { close(false); });
++  window.addEventListener('resize', function () { close(false); });
++  window.addEventListener('message', function (event) {
++    if (!trusted(event)) return;
++    var message = event.data;
++    if (!message || message.source !== 'codemap' || message.type !== 'capabilities') return;
++    // 独立本地文件没有认证维护宿主，不接收写入能力。
++    var validContext = message.context && typeof message.context.repo_id === 'string' && typeof message.context.branch === 'string';
++    capabilities = /^https?:$/.test(location.protocol) && validContext && Array.isArray(message.actions)
++      ? message.actions.filter(function (id) { return id === 'create-requirement'; }) : [];
++    hostContext = message.context && typeof message.context === 'object'
++      ? { repo_id: message.context.repo_id, branch: message.context.branch } : {};
++    close(false);
++  });
++  post({ type: 'ready', graph: graph.id });
 +})();
 +`;
-+
-+// 把事实块、样式和扩展脚本注入模板的 </body> 之前
-+export function injectCodemapFacts(template, factsText) {
-+  const facts = JSON.parse(factsText);
-+  if (facts?.schema !== 'codemap.facts/v1') {
-+    throw new Error(`Codemap facts sidecar has an unsupported schema: ${JSON.stringify(facts?.schema)}`);
-+  }
-+  const block = [
-+    `<script id="codemap-facts-data" type="application/json">${serializeFacts(facts)}</script>`,
-+    `<style id="codemap-facts-style">${STYLE}</style>`,
-+    `<script id="codemap-facts-extension">${SCRIPT}</script>`,
-+  ].join('\n');
-+  const index = template.lastIndexOf('</body>');
-+  if (index < 0) throw new Error('Codemap facts injection: template has no </body>');
-+  return `${template.slice(0, index)}${block}\n${template.slice(index)}`;
-+}
-+
-+export function loadCodemapFacts(inputPath) {
-+  const factsPath = codemapFactsPath(inputPath);
-+  try {
-+    return fs.readFileSync(factsPath, 'utf8');
-+  } catch (error) {
-+    if (error.code === 'ENOENT') return null;
-+    throw error;
-+  }
-+}

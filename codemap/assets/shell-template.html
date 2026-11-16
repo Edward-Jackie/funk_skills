@@ -504,6 +504,18 @@
   var crumbsEl = document.getElementById('crumbs');
   var frame = null, loadedGraph = null, pendingNode = null, resendTimer = 0;
   var infoExpanded = false;
+  var hostOrigin = location.origin;
+  try { if (document.referrer) hostOrigin = new URL(document.referrer).origin; } catch (_) {}
+  var hostCapabilities = { source: 'codemap', type: 'capabilities', actions: [], context: {} };
+  function frameOrigin() {
+    return frame ? new URL(frame.src, location.href).origin : location.origin;
+  }
+  function postHost(message) {
+    if (window.parent !== window) window.parent.postMessage(message, hostOrigin === 'null' ? '*' : hostOrigin);
+  }
+  function postCapabilities() {
+    if (frame && frame.contentWindow) frame.contentWindow.postMessage(hostCapabilities, frameOrigin() === 'null' ? '*' : frameOrigin());
+  }
 
   function parseHash() {
     var m = location.hash.match(/^#\/([^\/]+)(?:\/(.+))?$/);
@@ -524,7 +536,7 @@
 
   function postFocus() {
     if (!frame || !pendingNode || !frame.contentWindow) return;
-    frame.contentWindow.postMessage({ source: 'codemap', type: 'focus', node: pendingNode }, '*');
+    frame.contentWindow.postMessage({ source: 'codemap', type: 'focus', node: pendingNode }, frameOrigin() === 'null' ? '*' : frameOrigin());
   }
 
   function setCrumbs(g) {
@@ -763,6 +775,7 @@
     frame = document.createElement('iframe');
     frame.title = g.title;
     frame.addEventListener('load', function () {
+      postCapabilities();
       postFocus();
       clearTimeout(resendTimer);
       // 图页面的监听可能晚于 load 事件注册，补发一次（聚焦是幂等的）
@@ -776,13 +789,33 @@
 
   // 图页面 -> 外壳：下钻请求
   window.addEventListener('message', function (ev) {
-    if (!frame || ev.source !== frame.contentWindow) return;
     var m = ev.data;
     if (!m || typeof m !== 'object' || m.source !== 'codemap') return;
+    if (window.parent !== window && ev.source === window.parent && ev.origin === hostOrigin) {
+      if (m.type === 'capabilities') {
+        hostCapabilities = { source: 'codemap', type: 'capabilities', actions: /^https?:$/.test(location.protocol) && Array.isArray(m.actions) ? m.actions.filter(function (id) { return id === 'create-requirement'; }) : [], context: m.context && typeof m.context === 'object' ? { repo_id: m.context.repo_id, branch: m.context.branch } : {} };
+        postCapabilities();
+      } else if (m.type === 'focus' && typeof m.node === 'string') {
+        if (typeof m.graph === 'string' && byId.has(m.graph)) go(m.graph, m.node);
+        else { pendingNode = m.node; postFocus(); }
+      }
+      return;
+    }
+    if (!frame || ev.source !== frame.contentWindow || ev.origin !== frameOrigin()) return;
     if (m.type === 'open' && typeof m.graph === 'string' && byId.has(m.graph)) {
       go(m.graph, typeof m.node === 'string' ? m.node : null);
+      postHost({ source: 'codemap', type: 'open', graph: m.graph, node: typeof m.node === 'string' ? m.node : null });
+    } else if (m.type === 'ready') {
+      postCapabilities();
+      postHost({ source: 'codemap', type: 'ready' });
+    } else if (m.type === 'action' && m.action === 'create-requirement' && hostCapabilities.actions.indexOf(m.action) >= 0 && m.graph === loadedGraph) {
+      var current = byId.get(loadedGraph);
+      if ((m.node !== undefined && typeof m.node !== 'string') || (m.edge !== undefined && typeof m.edge !== 'string') || (m.node && m.edge)) return;
+      if (!current || (m.node && !current.nodes.some(function (node) { return node.id === m.node; })) || (m.edge && !(current.edges || []).some(function (edge) { return edge.id === m.edge; }))) return;
+      postHost({ source: 'codemap', type: 'action', action: m.action, graph: loadedGraph, node: typeof m.node === 'string' ? m.node : undefined, edge: typeof m.edge === 'string' ? m.edge : undefined, context: hostCapabilities.context });
     }
   });
+  postHost({ source: 'codemap', type: 'ready' });
 
   // 左侧导航整体收起 / 展开：窄屏是抽屉，宽屏是收起整列，收起状态只存浏览器本地
   var navButtons = ['menu-btn', 'nav-toggle', 'nav-fab'].map(function (id) {

@@ -45,6 +45,24 @@ def render(source: Path, graph: dict[str, Any]) -> str:
     digest = hashlib.sha256(source.read_bytes()).hexdigest()
     layout = graph.get("layout") if isinstance(graph.get("layout"), dict) else {}
     direction = layout.get("direction", "TB")
+    if layout.get("default") == "state":
+        lines = [f"%% 由 {source.name} 自动生成，请勿手工编辑。", f"%% source-sha256: {digest}", "stateDiagram-v2", f"  direction {direction}"]
+        for node in graph["nodes"]:
+            lines.append(f'  state "{escaped(node["label"])}" as {mermaid_id(node["id"])}')
+        lifecycle = graph["lifecycle"]
+        lines.append(f'  [*] --> {mermaid_id(lifecycle["initial_state_id"])}')
+        for edge in graph["edges"]:
+            label = str(edge.get("label") or "")
+            condition = str(edge.get("condition") or "")
+            if condition and condition != "always" and condition != label:
+                label += (" / " if label else "") + condition
+            lines.append(f'  {mermaid_id(edge["from"])} --> {mermaid_id(edge["to"])}' + (f': {escaped(label)}' if label else ""))
+            lines.append(f'  %% edge {edge["id"]}: {edge["evidence"]["level"]} - {escaped(edge["evidence"]["note"])}')
+        for terminal in lifecycle["terminal_state_ids"]:
+            lines.append(f'  {mermaid_id(terminal)} --> [*]')
+        for node in graph["nodes"]:
+            lines.append(f'  %% node {node["id"]}: {node["evidence"]["level"]} - {escaped(node["evidence"]["note"])}')
+        return "\n".join(lines) + "\n"
     lines = [
         f"%% 由 {source.name} 自动生成，请勿手工编辑。",
         f"%% source-sha256: {digest}",

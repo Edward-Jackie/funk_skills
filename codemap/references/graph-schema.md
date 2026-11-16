@@ -91,6 +91,28 @@ cycles: []                    # 每个实际有向环都必须声明
 
 `layout.lanes` 存在时，每个节点必须引用已声明的 `lane`。渲染时泳道按“从入口开始的流程次序”重排：泳道内节点的最小 `level` 越小越靠前，`level` 相同才按 `order`、再按声明顺序。因此 `order` 不决定位置，只用来在同层级的泳道之间定先后；入口泳道的节点要把 `level` 写成最小值。
 
+### 生命周期投影（V4.2 开发分支）
+
+`state` 编译为内置 Archify lifecycle v3，Mermaid 输出 `stateDiagram-v2`。生命周期节点仅接受 state/entry/terminal/decision，关系仅接受 transition；节点保留 `initial`、`terminal` 布尔标记，可选 `state_type` 使用 start/active/waiting/decision/success/failure/neutral/external。呈现类型不代替业务初终标志。
+
+```yaml
+lifecycle:
+  initial_state_id: pending
+  terminal_state_ids: [withdrawn, approved]
+  main_path: [pending, withdrawn]
+cycles: []
+```
+
+初始必须唯一且与标记一致，终止非空且无出边；所有状态从初始可达且可到达某终止。主路径首尾必须为初始/终止，相邻有迁移且不重复。合法环仍只声明在原有顶层 `cycles`，不复制到 lifecycle。Archify 生命周期采用固定横向主路径自动布局，Graph 的 TB 方向仅用于 Mermaid，不改变条件与对象身份。
+
+旧 state 图仍可读取；缺这些显式语义时编译/门禁给出定位诊断，不能自动猜初终或声称已迁移。已有 swimlane/layered 无需增加生命周期字段。
+
+### 版本化规则引用
+
+旧 `rules: ["文本"]` 保持可读且不拒绝，在侧栏标为未结构化。新引用为 `rules: [{id: withdraw-rule, version: "1"}]`，必须命中同图 `rule_definitions` 中唯一的 `{id, version}`；可带 label/description 描述已发布规则依据。未知 ID、重复定义、空版本或版本不符均拒绝。
+
+规则注册表是引用解析与来源快照，存在结构不等于人工确认；规范权威仍遵循 `[RULE][human-confirmed]` 与所属契约来源。设计工作台规则引用由规则对象派生，不手写第二份可维护规则。
+
 ## tags 与 context
 
 - `tags` 用于需求检索，保存稳定业务词，不堆函数名和同义词。
