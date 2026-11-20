@@ -88,13 +88,13 @@
 将下面的安装口令发送给你使用的 AI 助手：
 
 ```text
-请从 `~/dev/my/funk_skills/shengjidaguai-china-fangxin-zonghuofan` 软链接入本地技能目录。上游项目为 https://github.com/shengjidaguai-china/goutoujunshi。
+请从 `~/dev/my/funk_skills/shengjidaguai-china-fangxin-zonghuofan` 软链接入本地技能目录，软链命名为 `edj_treature`。上游项目为 https://github.com/shengjidaguai-china/goutoujunshi。
 ```
 
 安装完成后，可以输入：
 
 ```text
-请使用芳心纵火犯帮我梳理情绪、分析当前关系，并给出下一步建议。
+使用 $edj_treature 帮我梳理情绪、分析当前关系，并给出下一步建议。
 ```
 
 首次使用时，它会询问：

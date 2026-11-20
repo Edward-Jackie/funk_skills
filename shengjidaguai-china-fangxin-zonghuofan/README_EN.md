@@ -88,13 +88,13 @@ The knowledge base draws on **135 references** spanning relationship science, ps
 Send the following installation prompt to your AI assistant:
 
 ```text
-Symlink `~/dev/my/funk_skills/shengjidaguai-china-fangxin-zonghuofan` into your local skills directory. Upstream project: https://github.com/shengjidaguai-china/goutoujunshi.
+Symlink `~/dev/my/funk_skills/shengjidaguai-china-fangxin-zonghuofan` into your local skills directory as `edj_treature`. Upstream project: https://github.com/shengjidaguai-china/goutoujunshi.
 ```
 
 After installation, you can enter:
 
 ```text
-Use Fangxin Zonghuofan to help me process my emotions, assess my current relationship, and decide what to do next.
+Use $edj_treature to help me process my emotions, assess my current relationship, and decide what to do next.
 ```
 
 On first use, it will ask for:

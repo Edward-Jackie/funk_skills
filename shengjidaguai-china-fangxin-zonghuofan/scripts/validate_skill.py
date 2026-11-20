@@ -11,6 +11,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+SKILL_NAME = "edj_treature"
 ERRORS: list[str] = []
 SKILL_MAX_LINES = 150
 SKILL_MAX_CHARACTERS = 5_000
@@ -64,7 +65,7 @@ def validate_frontmatter() -> None:
     description_match = re.search(r"^description:\s*(.+)$", frontmatter, re.MULTILINE)
     name = name_match.group(1).strip() if name_match else ""
     description = description_match.group(1).strip() if description_match else ""
-    if name != "fangxin-zonghuofan" or not re.fullmatch(r"[a-z0-9-]{1,64}", name):
+    if name != SKILL_NAME:
         ERRORS.append(f"invalid skill name: {name!r}")
     if not description or len(description) > 1024 or "<" in description or ">" in description:
         ERRORS.append("description is empty, too long, or contains angle brackets")
@@ -111,8 +112,8 @@ def validate_inventory(runtime_only: bool) -> None:
     for filename in REQUIRED_PRACTICAL:
         require(f"references/practical/{filename}")
     agent = ROOT / "agents/openai.yaml"
-    if agent.is_file() and "$fangxin-zonghuofan" not in agent.read_text(encoding="utf-8"):
-        ERRORS.append("agents/openai.yaml default prompt must mention $fangxin-zonghuofan")
+    if agent.is_file() and f"${SKILL_NAME}" not in agent.read_text(encoding="utf-8"):
+        ERRORS.append(f"agents/openai.yaml default prompt must mention ${SKILL_NAME}")
 
 
 def validate_routes_and_regressions(runtime_only: bool) -> None:
@@ -248,7 +249,7 @@ def main() -> int:
         for error in ERRORS:
             print(f"ERROR: {error}")
         return 1
-    print("fangxin-zonghuofan validation passed")
+    print(f"{SKILL_NAME} validation passed")
     return 0
 
 
