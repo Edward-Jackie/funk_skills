@@ -9,7 +9,7 @@
   <a href="./README.md">简体中文</a> · <strong>English</strong>
 </p>
 
-<h1 align="center">Goutoujunshi · AI Relationship Strategist</h1>
+<h1 align="center">Fangxin Zonghuofan · AI Relationship Strategist</h1>
 
 <p align="center">
   <strong>More than a reply generator: understand the relationship, read the situation, and decide what to do next.</strong>
@@ -30,13 +30,13 @@
   If it helps you overthink less and make one clearer decision, give the project a ⭐ <strong>Star</strong> so you can find it again—and so others facing the same questions can discover it.
 </p>
 
-Most relationship advice offers only two answers: “Go for it” or “Break up.” Goutoujunshi does not rush to a conclusion from a single message. It starts by acknowledging the user's emotions, then separates facts from assumptions and unknowns. It considers attraction alongside practical circumstances, reciprocity, risk, opportunity cost, and long-term options before turning the analysis into a concrete next step.
+Most relationship advice offers only two answers: “Go for it” or “Break up.” Fangxin Zonghuofan does not rush to a conclusion from a single message. It starts by acknowledging the user's emotions, then separates facts from assumptions and unknowns. It considers attraction alongside practical circumstances, reciprocity, risk, opportunity cost, and long-term options before turning the analysis into a concrete next step.
 
 This is more than a library of scripted replies. It can analyze chat screenshots, exported text, and the user's account of events while preserving evidence boundaries. It can turn analysis into a message ready to send, a specific invitation, a first-date plan, or a conversation exercise that can be reviewed afterward. It is a Codex Skill for the full relationship lifecycle, designed for diverse relationships and capable of explaining the reasoning behind its advice.
 
 ## What It Can Help With
 
-| Your situation | How Goutoujunshi helps |
+| Your situation | How Fangxin Zonghuofan helps |
 | --- | --- |
 | You do not know how to reply | Gives you one message you can send immediately, followed by timing and response branches |
 | You want to pursue someone, reconnect, ask them out, or move the relationship forward | Provides concrete actions and adjusts the plan based on the other person's response |
@@ -47,9 +47,9 @@ This is more than a library of scripted replies. It can analyze chat screenshots
 
 ## No Assumptions About Who You Should Love
 
-Goutoujunshi supports heterosexual, gay, lesbian, bisexual, pansexual, and asexual users. It respects transgender, non-binary, and other gender identities. It can discuss single dating, long-term partnerships, marriage, long-distance relationships, remarriage, cross-cultural relationships, and consensual non-monogamy.
+Fangxin Zonghuofan supports heterosexual, gay, lesbian, bisexual, pansexual, and asexual users. It respects transgender, non-binary, and other gender identities. It can discuss single dating, long-term partnerships, marriage, long-distance relationships, remarriage, cross-cultural relationships, and consensual non-monogamy.
 
-The system does not impose fixed gender roles. Users of any gender can take the initiative or choose a highly proactive approach. In common heterosexual dating contexts in China, it may suggest that a man raise his level of initiative by one step when there is no clear rejection or discomfort. This is only a cultural calibration that individual preferences and real-world feedback can override—not a rule that men must pursue while women wait. The assessment always depends on the specific people, their behavior, mutual willingness, and practical circumstances.
+Users of any gender can take the initiative. When a user wants to move a dating interaction forward, the skill suggests one concrete, low-pressure step and adjusts for personal preferences, mutual willingness, and observable feedback.
 
 ## An Interdisciplinary Relationship Knowledge Base
 
@@ -77,7 +77,7 @@ The knowledge base draws on **135 references** spanning relationship science, ps
 
 <p align="center">
   <a href="./assets/reference-library-135.png">
-    <img src="./assets/reference-library-135.png" width="100%" alt="Overview of 135 references used by Goutoujunshi">
+    <img src="./assets/reference-library-135.png" width="100%" alt="Overview of 135 references used by Fangxin Zonghuofan">
   </a>
 </p>
 
@@ -88,13 +88,13 @@ The knowledge base draws on **135 references** spanning relationship science, ps
 Send the following installation prompt to your AI assistant:
 
 ```text
-Please download the public repository https://github.com/shengjidaguai-china/goutoujunshi and install it as a local Skill.
+Symlink `~/dev/my/funk_skills/shengjidaguai-china-fangxin-zonghuofan` into your local skills directory. Upstream project: https://github.com/shengjidaguai-china/goutoujunshi.
 ```
 
 After installation, you can enter:
 
 ```text
-Use Goutoujunshi to help me process my emotions, assess my current relationship, and decide what to do next.
+Use Fangxin Zonghuofan to help me process my emotions, assess my current relationship, and decide what to do next.
 ```
 
 On first use, it will ask for:
@@ -115,10 +115,10 @@ You can leave unknown fields blank or simply tell the story. The Skill will orga
 ChatLab is an optional dependency. After installing it and preparing chat exports that you obtained yourself, you can say:
 
 ```text
-Use Goutoujunshi with ChatLab to analyze the last three months of chats between me and Person A.
+Use Fangxin Zonghuofan with ChatLab to analyze the last three months of chats between me and Person A.
 ```
 
-Goutoujunshi first previews the import plan, then limits queries by conversation, participant, and time range. It does not directly read, decrypt, or export databases from messaging apps. Without ChatLab, you can still paste text or upload screenshots for analysis.
+Fangxin Zonghuofan first previews the import plan, then limits queries by conversation, participant, and time range. It does not directly read, decrypt, or export databases from messaging apps. Without ChatLab, you can still paste text or upload screenshots for analysis.
 
 ## How a Typical Answer Is Produced
 
@@ -129,8 +129,8 @@ User's account
   → separate facts / inferences / unknowns
   → retrieve only the knowledge needed for the situation
   → compare reciprocity, practical circumstances, risk, and opportunity cost
-  → give a clear preferred recommendation with reasons
-  → produce actions, wording, an observation window, and stopping conditions
+  → offer playful, measured, and direct options for dating decisions
+  → suggest a step for this week, with one chance to re-invite after an ambiguous reply
 ```
 
 Long-term memory and ChatLab are used only when the user consents or supplies the relevant data. They do not change this core analysis flow.
@@ -138,7 +138,7 @@ Long-term memory and ChatLab are used only when the user consents or supplies th
 ## Project Structure
 
 ```text
-goutoujunshi/
+shengjidaguai-china-fangxin-zonghuofan/
 ├── SKILL.md                    # Core behavior and workflow
 ├── agents/openai.yaml         # Codex display metadata and default prompt
 ├── references/

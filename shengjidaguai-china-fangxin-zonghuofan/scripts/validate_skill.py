@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the distributable goutoujunshi skill without third-party packages."""
+"""校验芳心纵火犯的发布文件，仅使用标准库。"""
 
 from __future__ import annotations
 
@@ -64,7 +64,7 @@ def validate_frontmatter() -> None:
     description_match = re.search(r"^description:\s*(.+)$", frontmatter, re.MULTILINE)
     name = name_match.group(1).strip() if name_match else ""
     description = description_match.group(1).strip() if description_match else ""
-    if name != "goutoujunshi" or not re.fullmatch(r"[a-z0-9-]{1,64}", name):
+    if name != "fangxin-zonghuofan" or not re.fullmatch(r"[a-z0-9-]{1,64}", name):
         ERRORS.append(f"invalid skill name: {name!r}")
     if not description or len(description) > 1024 or "<" in description or ">" in description:
         ERRORS.append("description is empty, too long, or contains angle brackets")
@@ -111,8 +111,8 @@ def validate_inventory(runtime_only: bool) -> None:
     for filename in REQUIRED_PRACTICAL:
         require(f"references/practical/{filename}")
     agent = ROOT / "agents/openai.yaml"
-    if agent.is_file() and "$goutoujunshi" not in agent.read_text(encoding="utf-8"):
-        ERRORS.append("agents/openai.yaml default prompt must mention $goutoujunshi")
+    if agent.is_file() and "$fangxin-zonghuofan" not in agent.read_text(encoding="utf-8"):
+        ERRORS.append("agents/openai.yaml default prompt must mention $fangxin-zonghuofan")
 
 
 def validate_routes_and_regressions(runtime_only: bool) -> None:
@@ -138,13 +138,24 @@ def validate_routes_and_regressions(runtime_only: bool) -> None:
             "**利益判断**",
             "**明确建议**",
             "**行动收束**",
-            "观察窗口或停止条件",
+            "默认把主动度提高一档",
+            "性别不参与分档",
+            "主动加档限于表达和安排",
+            "默认按会撩、稳健、强势的顺序并列给三版",
+            "用户明确要求代选时，再按目标和反馈推荐一版",
+            "推进场景给一个本周能做的动作",
+            "具体时间、地点和可发送的话术",
+            "再邀一次",
+            "再次含糊且无替代安排，或仍不回应时，停止追加邀约",
+            "观察窗口只作兜底",
+            "明确拒绝、僵住、躲避或撤回时立即停止",
             "当前对话没有档案时，先发紧凑问卷",
             "你：MBTI / 主观综合评分0–100 / 主要优势和短板",
             "对象A：代号 / MBTI / 主观综合评分0–100 / 当前关系",
             "经过：认识方式、发展多久、最近三件关键事件、联系和双方投入",
             "明确表示不想发展、要求不要联系或反复表示不欢迎时停止推进",
             "第一屏先给一条可复制成品",
+            "明确只要一句时，到成品即止",
             "发送时机、主要代价和积极／含糊／不回应的后续",
             "锁定“用户／对象”的说话人映射",
             "不声称能直接读取、解密或导出",
@@ -237,7 +248,7 @@ def main() -> int:
         for error in ERRORS:
             print(f"ERROR: {error}")
         return 1
-    print("goutoujunshi validation passed")
+    print("fangxin-zonghuofan validation passed")
     return 0
 
 
