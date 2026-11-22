@@ -48,9 +48,11 @@
 | `graphify` | 社区项目：任意输入（代码/文档/论文/图像/视频）转知识图谱并支持问答 |
 | `good_choise` | TypeSafe/Jev（System One 决策模型）官方开发技能：三种问题原语、state 结构化与路径引用、原子拆分、并行 fan-out、置信度路由与代码组合，不写死 endpoint |
 | `zhanlincui-frontend-design` | 高设计质量的前端界面生成，避免模板化 AI 风格 |
+| `patch-gg-pixelfx` | 像素风游戏特效（VFX）：pixelfx 库 244 个代码化特效的查找/换色/接入(canvas·Phaser·PixiJS·three.js)/烘 sprite sheet 导出到 Godot·Unity，含前后摇+命中顿帧+震屏的 act 时序与"草稿→渲染→看→改"自制流程 |
 
 ## 说明
 
 - 第三方 skill 均保留原目录结构，版权归原作者所有
 - `good_choise`：上游 <https://github.com/typesafe-ai/skills> 的官方 skill，**已改造成阿里云百炼接入版**（本地 fork，非原样副本）。改动点：① frontmatter `name` 匹配目录名（Claude 规范要求）；② `description` 增加百炼/decision-model-preview/systemone 触发词；③ 顶部新增「本地默认接入：阿里云百炼」一节，写死 workspace 专属域名、`decision-model-preview` 模型名、`instructions` 只接 String、RPM/上下文等实测口径，并给出 curl 与 SDK 样例；④ 正文两处官方结构化 instructions/criteria 写法补了「百炼只走 String」的例外标注。要回到上游原文：`git show HEAD~:good_choise/SKILL.md` 或重取 <https://raw.githubusercontent.com/typesafe-ai/skills/main/skills/typesafe-ai/SKILL.md>。（`TYPESAFE_BASE_URL`/`JEV_PROXY_API_KEY` 那两个环境变量是 `kerpopule/hermes-jev-skills` 客户端的东西，跟本 skill 无关）
+- `patch-gg-pixelfx`：上游 <https://github.com/patch-gg/pixelfx> 官方插件内的 `skills/pixelfx/SKILL.md`（v0.3.1，MIT）**本地化改写版**，非原样副本。改动点：① frontmatter `name` 匹配目录名；② `description` 追加中文触发词（像素特效/游戏特效/VFX/打击感/顿帧/震屏/sprite sheet 导出）；③ 新增「本地环境」一节，写死本机 checkout `/Users/edj/dev/ai_dev/pixelfx`（零安装，只需 Node ≥18；重新 clone 与 `pull --ff-only` 跟进上游的命令都在里面）、库不在 npm 的引入方式、以及 `gallery/fonts` 的 Patch Pixel 字体**不在 MIT 覆盖范围**这一许可例外；④ 「5. Publish it on Patch」标注本地默认跳过（上游平台推广）。要回到上游原文：`git -C /Users/edj/dev/ai_dev/pixelfx show HEAD:skills/pixelfx/SKILL.md`。改动清单与验证记录见 `patch-gg-pixelfx/README.md`
 - 本仓库整体许可见 [LICENSE](LICENSE)
