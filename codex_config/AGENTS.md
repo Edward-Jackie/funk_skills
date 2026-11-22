@@ -3,6 +3,7 @@
 开发环境有uv, golang, nvm, cargo, gh等。
 上传代码只传代码，其他文件的上传需要过问我；说「提交」即 commit + push，不再单独确认 push。
 需要通过选择卡片向我提问时，Claude 使用 `AskUserQuestion`，Codex 使用 `request_user_input`。
+全局配置文件必须带版本标记：本文件及其所有生效/备份副本（`~/.codex/AGENTS.md`、`~/dev/ai_dev/funk_skills/codex_config/AGENTS.md`、`~/dev/ai_dev/funk_skills/claude_config/CLAUDE.md`）末尾写 `版本：YYYYMMDDNN`（日期+当日序号，如 2026112301）；改动即 +1 并同步所有副本。仓库级/项目级 AGENTS.md（如 funk_notes、airball）**不加**版本号。
 
 <!-- edj:user-profile:start -->
 ## 用户画像加载（由 edj skill 注入，勿手动改此段）
@@ -20,6 +21,9 @@
 
 完整画像见 `/Users/edj/.claude/user_profile.md`，由 edj skill 维护。
 <!-- edj:user-profile:end -->
+
+<!-- 全局配置版本标记：格式 YYYYMMDDNN（日期 + 当日序号）。改动本文件必须 +1，并同步所有生效/备份副本。 -->
+版本：2026112301
 
 ---
 

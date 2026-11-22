@@ -4,10 +4,12 @@
 
 ## 全局配置存档
 
+> **版本标记规矩（2026-11-23 立）**：全局配置文件末尾必须写 `版本：YYYYMMDDNN`（日期 + 当日序号，如 `2026112301`），改动即 +1 并同步所有生效/备份副本。仓库级、项目级 `AGENTS.md`（`airball`、`luxury-mall`、`funk_notes`…）**不加**版本号。
+
 | 目录 | 内容 |
 |---|---|
-| `claude_config/` | Claude Code 的全局配置 `CLAUDE.md`。**本机不存在 `~/.claude/CLAUDE.md`**，所以此份只是跨设备备份/文档；本机实际生效的全局配置是 `~/.codex/AGENTS.md`（真源 `~/dev/my/funk_profile/AGENTS.md`）。2026-11-23 已把 push 口径与称呼（大哥→大当家）对齐现行规则 |
-| `codex_config/` | Codex 全局配置 `AGENTS.md` 的备份。**正文与生效文件 `~/.codex/AGENTS.md` 逐字一致**（真源是 `~/dev/my/funk_profile/AGENTS.md`）：称呼/环境/上传与 push 口径/选择卡片工具 + user_profile 注入段；文末「备份留档」保存生效版已不含的对话规范、代码要求与开发完成度规范（先探后写、完成度对齐现有模块、交付前 DoD 自查） |
+| `claude_config/` | Claude Code 的全局配置 `CLAUDE.md`。**本机不存在 `~/.claude/CLAUDE.md`**，所以此份只是跨设备备份/文档；本机实际生效的全局配置是 `~/.codex/AGENTS.md`（真源 `~/dev/my/funk_profile/AGENTS.md`）。2026-11-23 已把 push 口径与称呼（大哥→大当家）对齐现行规则 · `版本：2026112301` |
+| `codex_config/` | Codex 全局配置 `AGENTS.md` 的备份。**正文与生效文件 `~/.codex/AGENTS.md` 逐字一致**（真源是 `~/dev/my/funk_profile/AGENTS.md`）：称呼/环境/上传与 push 口径/选择卡片工具/版本标记规矩 + user_profile 注入段，末尾 `版本：2026112301`；其后「备份留档」保存生效版已不含的对话规范、代码要求与开发完成度规范（先探后写、完成度对齐现有模块、交付前 DoD 自查） |
 
 ## 自研 skills
 
